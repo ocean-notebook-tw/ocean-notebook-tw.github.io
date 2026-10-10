@@ -130,13 +130,14 @@ function stCover(el) {
       </div></div>
   </div>
   <div class="row" style="justify-content:center;gap:6px">${['clownfish', 'turtle', 'jelly', 'orca', 'urchin', 'kelp'].map(k => `<div style="width:92px">${art(k, O[k] ? O[k].n : '海藻')}</div>`).join('')}</div>
-  ${guide('歡迎回來！科學家會在<b>調查筆記本</b>記錄調查時的想法、問題和結果，還會畫圖表。先在封面寫上你的名字吧！')}
+  ${guide(`<span id="hiName">${S.name ? esc(S.name) + '，' : ''}</span>歡迎回來！科學家會在<b>調查筆記本</b>記錄調查時的想法、問題和結果，還會畫圖表。<span id="hiAsk">${S.name ? '確認筆記本封面上的名字，就可以開始調查了！' : '先在封面寫上你的名字吧！'}</span>`)}
   <div class="panel stack" style="gap:10px">
     <label for="nm"><b>調查筆記本　姓名</b></label>
     <input type="text" id="nm" maxlength="20" placeholder="例如：王小海" value="${esc(S.name)}">
     <div class="row"><button class="btn" id="open">打開筆記本，開始調查 →</button><span class="muted" id="nmh"></span></div>
   </div></div>`;
   $('#open').onclick = () => { const v = $('#nm').value.trim(); if (!v) { $('#nmh').textContent = '請先寫上你的名字。'; $('#nm').focus(); return; } S.name = v; setName(v); complete(0); go(1); };
+  $('#nm').oninput = e => { const v = e.target.value.trim(); $('#hiName').textContent = v ? v + '，' : ''; };
   $('#nm').onkeydown = e => { if (e.key === 'Enter') $('#open').click(); };
 }
 
@@ -442,7 +443,7 @@ function stReview(el) {
     $('#end').innerHTML = `<div class="panel stack" style="gap:12px;border-color:var(--ok)">
       <h3 class="q" style="color:var(--ok)">恭喜 ${esc(S.name)}，完成第 2.1 節「介紹海洋生物」！</h3>
       <p>你觀察了 ${S.seen.length} 種海洋生物，完成了《生物需求》圖表，並在概念牆貼上 ${S.concepts.filter(Boolean).length} 個關鍵概念。下一節「比較棲息地」，我們會調查生物住在海洋的哪些地方。</p>
-      <div class="row"><button class="btn sec" id="nb2">打開我的筆記本</button><button class="btn-plain" id="copyNb">複製筆記本內容（交給老師）</button><span class="muted" id="cpm"></span></div></div>`;
+      ${NB.endButtons()}</div>`;
     $('#nb2').onclick = openNotebook; $('#copyNb').onclick = copyNotebook;
   }
 }
@@ -461,20 +462,18 @@ function notebookText() {
     `八、希望學到：${S.hope || '—'}`,
     `概念牆：${CONCEPTS.filter((_, i) => S.concepts[i]).join(' ') || '—'}`].join('\n');
 }
-function copyNotebook() {
-  const t = notebookText(), m = $('#cpm');
-  const fallback = () => { overlay(`<h3 class="q">筆記本內容</h3><p class="muted">請全選後複製：</p><textarea id="cpt" style="min-height:240px">${esc(t)}</textarea><div class="row"><button class="btn" data-close>關閉</button></div>`); const a = $('#cpt'); a.focus(); a.select(); };
-  try { navigator.clipboard.writeText(t).then(() => { if (m) m.textContent = '已複製！'; }, fallback); } catch (e) { fallback(); }
-}
+function copyNotebook() { NB.copy(notebookText(), $('#cpm')); }
 function openNotebook() {
-  const item = (h, b) => `<div class="nb-item"><h4>${h}</h4><p>${b}</p></div>`;
-  overlay(`<h3 class="q">我的調查筆記本${S.name ? '｜' + esc(S.name) : ''}</h3>
-    ${item('暖身想到的海洋生物', S.brain.length ? esc(S.brain.join('、')) : '還沒寫')}
-    ${item('第一個想法', esc(S.idea || '還沒寫'))}
-    ${S.aNeedsDone || S.pNeedsDone ? `<div class="nb-item">${needChart()}</div>` : ''}
-    ${item('調查紀錄', S.log.length ? S.log.map(esc).join('\n') : '開始調查後，你的發現會自動記在這裡。')}
-    <div class="row"><button class="btn" data-close>關上筆記本</button><button class="btn-plain" id="cp2">複製內容</button><span class="muted" id="cpm"></span></div>`);
-  $('#cp2').onclick = copyNotebook;
+  const { sec, text, card } = NB;
+  const org = (id, label, body) => O[id] ? `<div class="nb-org">${art(id, O[id].n)}<div style="min-width:0"><span class="nb-lab">${label}</span><b>${O[id].n}</b>${body}</div></div>` : '';
+  const html = `
+    ${sec('我的第一個想法', `${S.brain.length ? `<p class="nb-lab">暖身想到的海洋生物（${S.brain.length} 種）</p><div class="nb-chips">${S.brain.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}${S.idea ? card('不同地區的海洋生物有何不同？為什麼？', text(S.idea)) : ''}` , '完成第 1 站後會出現')}
+    ${sec('生物之旅', S.seen.length ? `<p class="nb-text">觀察了 <b>${S.seen.length}</b> / 16 種海洋生物。</p><div class="nb-grid">${org(S.knownId, '我認識的生物', text(S.knownText, '還沒寫'))}${org(S.newId, '我好奇的生物', text(S.newText, '還沒寫'))}</div>` : '', '完成第 2 站後會出現')}
+    ${sec('生物需求圖表', S.aNeedsDone || S.pNeedsDone ? needChart() : '', '完成第 3 站後會出現')}
+    ${sec('最讓我感興趣的生物', S.favId ? org(S.favId, '最感興趣', text(S.favWhy, '還沒寫理由')) : '', '完成第 4 站後會出現')}
+    ${sec('我希望學到的海洋知識', text(S.hope, '完成第 4 站後會出現'))}
+    ${sec('我學到的關鍵概念', S.concepts.some(Boolean) ? `<div class="nb-concepts">${CONCEPTS.map((c, i) => S.concepts[i] ? `<div class="concept got">${esc(c)}</div>` : '').join('')}</div>` : '', '完成第 3 站後會出現')}`;
+  NB.open(`介紹海洋生物｜${S.name || '調查員'}`, `<span>徽章 <b>${S.badges.filter(b => b > 0).length}</b>/4</span><span>關鍵概念 <b>${S.concepts.filter(Boolean).length}</b>/2</span>`, html, notebookText);
 }
 
 /* ---------- 啟動 ---------- */

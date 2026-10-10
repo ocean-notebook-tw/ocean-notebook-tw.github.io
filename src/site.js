@@ -16,18 +16,12 @@ function showHome() {
       <div class="stack" style="gap:10px"><span class="muted" style="font-size:14px;letter-spacing:.06em">國家海洋研究院｜海洋科學序列教材（OSS）G3–G5 初階海洋素養</span>
         <h2>海洋科學調查筆記本</h2>
         <p>跟著海博士，像海洋科學家一樣觀察、收集證據、用證據解釋海洋。每一節都對照教師手冊的教學流程設計，學生可以自己一站一站完成。</p></div>
-      <div class="panel stack" style="gap:10px"><label for="homeName"><b>調查員姓名</b></label>
-        <input type="text" id="homeName" maxlength="20" placeholder="例如：王小海" value="${escH(nm)}">
-        <div class="row"><button class="btn" id="startBtn">${nm ? '繼續調查' : '開始第一節'} →</button><span class="muted" id="hh" style="font-size:14px">名字會帶到每一個單元。</span></div></div>
     </div>
     <div class="units">${CATALOG.map(u => `<section class="ucol"><span class="sub">${u.t}</span><h3>${u.n}</h3>
       ${u.ls.map(([no, t, k]) => { if (!k) return `<div class="lesson"><span class="no">${no}</span><span>${t}</span><span class="soon">製作中</span></div>`;
         const p = UNITS[k].progress(); const done = p.done >= p.total;
         return `<button class="lesson open" data-u="${k}"><span class="no">${no}</span><span>${t}</span><span class="pg ${done ? 'done' : ''}">${done ? '完成' : p.done ? `${p.done}/${p.total} 站` : '開始'}</span></button>`; }).join('')}</section>`).join('')}</div>`;
-  const saveName = () => { const v = $('#homeName').value.trim(); if (v) { setName(v); $('#who').textContent = `調查員：${v}`; } return v; };
-  $('#homeName').onchange = saveName;
-  $('#startBtn').onclick = () => { if (!saveName()) { $('#hh').textContent = '請先寫上你的名字。'; $('#homeName').focus(); return; } location.hash = UNITS.u21.progress().done > 0 && UNITS.u11.progress().done >= UNITS.u11.progress().total ? 'u21' : 'u11'; };
-  $$('[data-u]').forEach(b => b.onclick = () => { saveName(); location.hash = b.dataset.u; });
+  $$('[data-u]').forEach(b => b.onclick = () => { location.hash = b.dataset.u; });
 }
 let current = null;
 function route() {

@@ -278,7 +278,7 @@ function stCover(el) {
         <span>6</span><span>海洋星球？</span><span class="t">5 分</span>
       </div></div>
   </div>
-  ${guide('你好！在這個單元裡，你會學到海洋科學家是如何<b>發現問題、推測答案</b>。接下來的時間，你要像海洋科學家一樣思考與行動。<br>科學家會用<b>調查筆記本</b>記錄觀察到的現象、想法、問題和調查結果。先在筆記本封面寫上你的名字吧！')}
+  ${guide(`<span id="hiName">${S.name ? esc(S.name) + '，' : ''}</span>你好！在這個單元裡，你會學到海洋科學家是如何<b>發現問題、推測答案</b>。接下來的時間，你要像海洋科學家一樣思考與行動。<br>科學家會用<b>調查筆記本</b>記錄觀察到的現象、想法、問題和調查結果。<span id="hiAsk">${S.name ? '確認筆記本封面上的名字，就可以開始調查了！' : '先在筆記本封面寫上你的名字吧！'}</span>`)}
   <div class="panel stack" style="gap:10px">
     <label for="nm"><b>調查筆記本　姓名</b></label>
     <input type="text" id="nm" maxlength="20" placeholder="例如：王小海" value="${esc(S.name)}">
@@ -288,6 +288,7 @@ function stCover(el) {
     const v = $('#nm').value.trim(); if (!v) { $('#nmh').textContent = '請先寫上你的名字。'; $('#nm').focus(); return; }
     S.name = v; setName(v); complete(0); go(1);
   };
+  $('#nm').oninput = e => { const v = e.target.value.trim(); $('#hiName').textContent = v ? v + '，' : ''; };
   $('#nm').onkeydown = e => { if (e.key === 'Enter') $('#open').click(); };
 }
 
@@ -318,7 +319,7 @@ function stIdea(el) {
   <div id="after"></div></div>`;
   const ta = $('#idea'), cnt = () => $('#cnt').textContent = `已寫 ${ta.value.trim().length} 字`;
   ta.oninput = () => { S.idea = ta.value; save(); cnt(); }; cnt();
-  $$('[data-tip]').forEach(b => b.onclick = () => { ta.value += (ta.value && !/\n$/.test(ta.value) ? '\n' : '') + b.dataset.tip + '：'; ta.focus(); ta.oninput(); });
+  $$('[data-tip]').forEach(b => b.onclick = () => { if (ta.value.includes(b.dataset.tip + '：')) { ta.focus(); return; } ta.value += (ta.value && !/\n$/.test(ta.value) ? '\n' : '') + b.dataset.tip + '：'; ta.focus(); ta.oninput(); });
   let tmr = null;
   $('#think').onclick = () => {
     if (tmr) return; let s = 60; $('#think').disabled = true;
@@ -331,8 +332,10 @@ function stIdea(el) {
     showAfter(true);
   };
   const showAfter = fresh => {
-    $('#after').innerHTML = `<div class="stack">${fresh ? '<div class="fb ok">已經放進筆記本了！隨時可以按上方的「我的筆記本」回來看。</div>' : ''}<div id="aiI"></div>${nextBtn(1)}</div>`; bindNext(1);
-    aiHere($('#aiI'), { id: 'u11-idea', getAnswer: () => S.idea });
+    const rec = S.ai['u11-idea'];
+    if (fresh && rec && rec.answer !== S.idea) { delete S.ai['u11-idea']; save(); }
+    $('#after').innerHTML = `<div class="stack"><div id="aiI"></div>${nextBtn(1)}</div>`; bindNext(1);
+    aiHere($('#aiI'), { id: 'u11-idea', getAnswer: () => S.idea, auto: fresh });
   };
   if (S.badges.includes(1)) showAfter(false);
 }
@@ -340,19 +343,31 @@ function stIdea(el) {
 /* ===== 2 多少海洋？多少陸地？ ===== */
 function wsSVG(land, sea) {
   const W = 200, H = 90, x = W * land / 100;
+  /* 區塊太窄時，標籤改放到虛線外側，避免文字壓到線或被切掉 */
+  const lab = (cx, w, pct, word, col, side) => {
+    let tx = cx, anchor = 'middle';
+    if (w < 36) { anchor = side === 'end' ? 'end' : 'start'; tx = side === 'end' ? x - 4 : x + 4; }
+    return `<text x="${tx}" y="20" text-anchor="${anchor}" font-size="13" font-weight="700" fill="${col}">${pct}%</text><text x="${tx}" y="34" text-anchor="${anchor}" font-size="11" fill="${col}">${word}</text>`;
+  };
   return `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">
     <rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="var(--sheet)" stroke="var(--ink)" stroke-width="1.2"/>
     <rect x="${x}" y="50" width="${W - x - 1}" height="${H - 51}" fill="var(--sea-soft)"/>
     <path d="M1 40 Q${x * .3} 36 ${x * .55} 42 T${x} 50" fill="none" stroke="var(--ink)" stroke-width="1.2"/>
     <path d="M${x} 50 ${Array.from({ length: Math.max(1, Math.floor((W - x) / 12)) }, (_, i) => `q3 -4 6 0 q3 4 6 0`).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="1"/>
     <line x1="${x}" y1="4" x2="${x}" y2="${H - 2}" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/>
-    <text x="${x / 2}" y="24" text-anchor="middle" font-size="12" fill="var(--ink)">${land}% 陸地</text>
-    <text x="${x + (W - x) / 2}" y="24" text-anchor="middle" font-size="12" fill="var(--sea)">${sea}% 海水</text></svg>`;
+    ${lab(x / 2, x, land, '陸地', 'var(--ink)', 'start')}${lab(x + (W - x) / 2, W - x, sea, '海水', 'var(--sea)', 'end')}</svg>`;
 }
 function stGuess(el) {
+  const WHY = [
+    '「我感覺」是心裡的想法，沒有量過、也沒有觀察過，所以是感覺或看法，不是證據。',
+    '「數一數」是實際觀察地球儀得到的結果，別人來數也會得到差不多的答案，所以是證據。',
+    '住在陸地上，不代表陸地比較多。這是從自己的生活猜出來的想法，沒有觀察或測量，所以是看法。',
+    '拋了 20 次、記下 14 次落在海洋，這是實際做實驗、記錄下來的數字，所以是證據。',
+    '喜歡什麼顏色，和海洋有多大沒有關係。這是個人的喜好，不是觀察或測量，所以是看法。',
+    '太空照片是用相機真實拍下的地球，從照片上觀察到大部分是藍色，所以是證據。'];
   const ST = [
     ['我感覺地球大部分被海洋覆蓋。', 'f'],
-    ['在地球儀上，藍色的部分看起來比黃色的部分多很多。', 'e'],
+    ['我在地球儀上數一數，藍色的部分比黃色的部分多很多。', 'e'],
     ['我覺得陸地應該比較多，因為我住在陸地上。', 'f'],
     ['拋接地球儀 20 次，食指有 14 次落在海洋上。', 'e'],
     ['藍色是我最喜歡的顏色，所以海洋一定很大。', 'f'],
@@ -372,34 +387,71 @@ function stGuess(el) {
     </div>
   </div>
   <div id="evi" ${S.guess && S.guessLocked ? '' : 'hidden'} class="stack">
-    ${guide('你選的答案對不對，我們先不急著知道。科學家會<b>尋找線索來幫助解釋事情和回答問題，這些線索被稱為證據</b>。<br>像「我感覺地球大部分被海洋覆蓋」這種感覺或看法，就<b>不是</b>證據。')}
+    <div id="aiG"></div>
     <div class="panel stack" style="gap:12px"><p class="q">哪些是證據？哪些只是感覺或看法？</p>
       <div class="cards">${ST.map(([t, a], i) => {
         const v = S.evSort[i]; const cls = v ? (v === a ? 'right' : 'wrong') : '';
         return `<div class="card ${cls}" data-i="${i}"><span>${t}</span><div class="row"><button class="choice" data-s="e">證據</button><button class="choice" data-s="f">感覺或看法</button></div><span class="fbx muted" style="font-size:14px">${v ? (v === a ? '答對了！' : '再想想看：這是測量或觀察得來的資訊嗎？') : ''}</span></div>`;
       }).join('')}</div>
     </div>
+    <div id="evWhy"></div>
     <div id="after2"></div>
   </div></div>`;
   $$('[data-g]').forEach(b => b.onclick = () => { S.guess = b.dataset.g; save(); $$('[data-g]').forEach(x => x.classList.toggle('on', x === b)); $('#whyBox').hidden = false; });
   $$('[data-w]').forEach(b => b.onclick = () => { const w = b.dataset.w; S.guessTags = S.guessTags.includes(w) ? S.guessTags.filter(x => x !== w) : [...S.guessTags, w]; b.classList.toggle('on'); save(); });
   $('#gw').oninput = e => { S.guessWhy = e.target.value; save(); };
-  const showLock = () => {
-    $('#lockFb').innerHTML = `<div class="stack" style="gap:10px"><div class="fb info">已記下：你選了 <b>${S.guess}</b>。等一下我們會用證據來檢查它！</div><div id="aiG"></div></div>`;
-    aiHere($('#aiG'), { id: 'u11-guess', button: '請海博士看看我的理由', minLen: 1,
-      getAnswer: () => `我選 ${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）。理由：${[...S.guessTags, S.guessWhy].filter(Boolean).join('、') || '沒有寫'}` });
+  const guessText = () => `我選 ${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）。理由：${[...S.guessTags, S.guessWhy].filter(Boolean).join('、') || '沒有寫'}`;
+  const showLock = fresh => {
+    $('#lockFb').innerHTML = `<div class="fb info">已記下：你選了 <b>${S.guess}</b>。等一下我們會用證據來檢查它！</div>`;
+    const rec = S.ai['u11-guess'];
+    if (fresh && rec && rec.answer !== guessText()) { delete S.ai['u11-guess']; save(); }
+    $('#aiG').innerHTML = '';
+    aiHere($('#aiG'), { id: 'u11-guess', button: '請海博士看看我的理由', minLen: 1, getAnswer: guessText, auto: fresh });
   };
   $('#lock').onclick = () => {
     S.guessLocked = true; save(); log(`第一次猜測：選了 ${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）`);
-    showLock();
-    $('#evi').hidden = false; addVocab('證據', '證據就是資訊，例如測量或觀察得來的資訊，可以幫助我們解釋事物或回答問題。');
+    $('#evi').hidden = false; showLock(true); addVocab('證據', '證據就是資訊，例如測量或觀察得來的資訊，可以幫助我們解釋事物或回答問題。');
   };
-  if (S.guessLocked && S.guess) showLock();
+  if (S.guessLocked && S.guess) showLock(false);
+  const judgeOwn = (s, k) => {
+    const ev = /[0-9０-９]|量|測|數了|數一數|記錄|紀錄|觀察|看到|拍|照片|實驗|資料|調查|次|公尺|公里|度|%/.test(s);
+    const fe = /覺得|感覺|喜歡|討厭|應該|可能|好像|猜|一定|認為|可怕|漂亮|好看|希望/.test(s);
+    const verdict = ev && !fe ? 'e' : fe && !ev ? 'f' : null;
+    if (!verdict) return '這句話有點難判斷喔！想一想：它是你實際觀察、測量或記錄到的嗎？如果是，就是證據；如果是心裡的想法或喜好，就是感覺或看法。可以把句子寫得更清楚再試一次。';
+    const why = verdict === 'e' ? '因為它是從觀察、測量或記錄得來的資訊，別人去查證也會得到差不多的結果。' : '因為它是心裡的想法或感受，沒有經過觀察或測量。';
+    const agree = !k ? '' : k === verdict ? '你判斷對了！' : `你選了「${label(k)}」，再想想看喔。`;
+    return `${agree}海博士覺得這句話是「${label(verdict)}」，${why}`;
+  };
+  const label = k => k === 'e' ? '證據' : '感覺或看法';
+  const askWhy = (i, picked) => {
+    const key = 'u11-evwhy-' + i; delete S.ai[key]; save();
+    const box = $('#evWhy'); box.innerHTML = '';
+    aiHere(box, { id: key, qaId: 'u11-evwhy', auto: true, minLen: 1,
+      getAnswer: () => `句子：「${ST[i][0]}」。我選了「${label(picked)}」。為什麼不對呢？`,
+      extra: () => ({ sentence: ST[i][0], student_choice: label(picked), correct: label(ST[i][1]) }),
+      fallback: () => WHY[i] + '再試一次看看！' });
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
   const check = () => {
     const allRight = ST.every(([, a], i) => S.evSort[i] === a);
     if (allRight) {
       complete(2);
-      $('#after2').innerHTML = `<div class="stack"><div class="fb ok">全部分對了！接下來，我們要用<b>地球儀</b>來找出「海水和陸地各覆蓋多少地球」的證據。</div>${nextBtn(2)}</div>`; bindNext(2);
+      if ($('#ownQ')) return;
+      $('#evWhy').innerHTML = '';
+      $('#after2').innerHTML = `<div class="stack"><div class="fb ok">全部分對了！</div>
+        <div class="panel stack" style="gap:10px" id="ownQ"><span class="ref" style="align-self:flex-start">換你出題</span>
+          <p class="q">自己寫一句關於海洋的話，可以是證據，也可以是感覺，請海博士來判斷！</p>
+          <p class="muted" style="font-size:15px">例如：「我在海邊量了水溫，是 28 度。」或「我覺得海洋很可怕。」</p>
+          <input type="text" id="ownS" maxlength="80" placeholder="寫一句話……" value="${esc(S.ownS || '')}">
+          <div class="row"><span>你覺得它是：</span><button class="choice ${S.ownK === 'e' ? 'on' : ''}" data-ok="e">證據</button><button class="choice ${S.ownK === 'f' ? 'on' : ''}" data-ok="f">感覺或看法</button></div>
+          <div id="aiOwn"></div></div>
+        <p class="muted" style="font-size:15px">接下來，我們要用<b>地球儀</b>來找出「海水和陸地各覆蓋多少地球」的證據。</p>${nextBtn(2)}</div>`; bindNext(2);
+      const fresh = () => { if (ownSlot && S.ai['u11-evown'] && S.ai['u11-evown'].thread.length) ownSlot.reset(); };
+      $('#ownS').oninput = e => { S.ownS = e.target.value; save(); fresh(); };
+      $$('[data-ok]').forEach(x => x.onclick = () => { S.ownK = x.dataset.ok; save(); $$('[data-ok]').forEach(y => y.classList.toggle('on', y === x)); fresh(); });
+      const ownSlot = aiHere($('#aiOwn'), { id: 'u11-evown', button: '請海博士判斷', minLen: 4,
+        getAnswer: () => (S.ownS || '').trim() ? `我寫的句子：「${S.ownS.trim()}」。我覺得它是：${S.ownK ? label(S.ownK) : '還不確定'}。` : '',
+        fallback: () => judgeOwn(S.ownS || '', S.ownK) });
     }
   };
   $$('.card[data-i]').forEach(card => {
@@ -407,7 +459,8 @@ function stGuess(el) {
     $$('[data-s]', card).forEach(b => b.onclick = () => {
       S.evSort[i] = b.dataset.s; save(); const ok = b.dataset.s === a;
       card.classList.toggle('right', ok); card.classList.toggle('wrong', !ok);
-      $('.fbx', card).textContent = ok ? (a === 'e' ? '答對了！這是觀察或測量得來的資訊。' : '答對了！這只是感覺或看法。') : '再想想看：這是測量或觀察得來的資訊嗎？';
+      $('.fbx', card).innerHTML = ok ? (a === 'e' ? '答對了！這是觀察或測量得來的資訊。' : '答對了！這只是感覺或看法。') : '再想想看：這是測量或觀察得來的資訊嗎？ <button class="chip" data-why>問海博士為什麼</button>';
+      const w = $('[data-why]', card); if (w) w.onclick = () => askWhy(i, b.dataset.s);
       check();
     });
   });
@@ -657,9 +710,9 @@ function stToss(el) {
       <span class="lbl sea">海洋</span><span class="marks">${tallyMarks(T.ocean) || '　'}</span><b>${T.ocean}</b>
       <span>合計</span><span class="muted">海洋佔 <b style="color:var(--sea)">${pct()}%</b></span><b>${n}</b>`;
     $('#chart').innerHTML = chart(T.hist);
-    $('#auto').hidden = T.manual < 10;
-    if (n >= 30) meaning();
-    else $('#mean').innerHTML = `<div class="fb info">已經拋了 ${n} 次。${T.manual < 10 ? `再自己拋 ${10 - T.manual} 次，就能使用「快速拋 20 次」。` : ''}收集到 30 次以上的證據，就可以開始分析結果。</div>`;
+    $('#auto').hidden = T.manual < 5;
+    if (n >= 25) meaning();
+    else $('#mean').innerHTML = `<div class="fb info">已經拋了 ${n} 次。${T.manual < 5 ? `再自己拋 ${5 - T.manual} 次，就能使用「快速拋 20 次」。` : ''}收集到 25 次以上的證據，就可以開始分析結果。</div>`;
   };
   const record = type => { T[type]++; T.hist.push(Math.round(T.ocean / (T.land + T.ocean) * 1000) / 10); save(); };
   $('#toss').onclick = async () => {
@@ -781,7 +834,7 @@ function stPlanet(el) {
     $('#end').innerHTML = `<div class="panel stack" style="gap:12px;border-color:var(--ok)">
       <h3 class="q" style="color:var(--ok)">恭喜 ${esc(S.name)}，完成第 1.1 節「海洋星球」！</h3>
       <p>你收集了 ${S.badges.filter(b => b > 0).length} 枚徽章，並在概念牆貼上了 ${S.concepts.filter(Boolean).length} 個關鍵概念。下一節「模擬洋流」，我們會繼續調查海洋。</p>
-      <div class="row"><button class="btn sec" id="nb2">打開我的筆記本</button><button class="btn-plain" id="copyNb">複製筆記本內容（交給老師）</button><span class="muted" id="cpm"></span></div></div>`;
+      ${NB.endButtons()}</div>`;
     $('#nb2').onclick = openNotebook; $('#copyNb').onclick = copyNotebook;
   }
 }
@@ -798,24 +851,30 @@ function notebookText() {
     `六、地球最準確的名字：${S.planet === 'ocean' ? '海洋星球' : S.planet === 'land' ? '陸地星球' : '—'}；理由：${S.planetWhy || '—'}`,
     `七、補充後的想法：${S.revised || '—'}`,
     `八、我還想知道：${S.questions || '—'}`,
-    `九、和海博士的討論：${Object.entries(S.ai || {}).filter(([, r]) => r.thread && r.thread.length).map(([k, r]) => `\n［${(window.QA && QA[k] && QA[k].stage) || k}］` + r.thread.map(m => (m.r === 's' ? '我：' : '海博士：') + m.t).join('\n')).join('') || '—'}`,
+    `九、和海博士的討論：${Object.entries(S.ai || {}).filter(([, r]) => r.thread && r.thread.length).map(([k, r]) => `\n［${(window.QA && (QA[k] || QA[k.replace(/-\d+$/, '')]) || {}).stage || k}］` + r.thread.map(m => (m.r === 's' ? '我：' : '海博士：') + m.t).join('\n')).join('') || '—'}`,
     `概念牆：${CONCEPTS.filter((_, i) => S.concepts[i]).join(' ') || '—'}`].join('\n');
 }
-function copyNotebook() {
-  const t = notebookText(), m = $('#cpm');
-  const fallback = () => { overlay(`<h3 class="q">筆記本內容</h3><p class="muted">請全選後複製：</p><textarea id="cpt" style="min-height:240px">${esc(t)}</textarea><div class="row"><button class="btn" data-close>關閉</button></div>`); const a = $('#cpt'); a.focus(); a.select(); };
-  try { navigator.clipboard.writeText(t).then(() => { if (m) m.textContent = '已複製！'; }, fallback); } catch (e) { fallback(); }
-}
+function copyNotebook() { NB.copy(notebookText(), $('#cpm')); }
 function openNotebook() {
-  const T = S.toss, n = T.land + T.ocean;
-  const item = (h, b) => `<div class="nb-item"><h4>${h}</h4><p>${b}</p></div>`;
-  overlay(`<h3 class="q">我的調查筆記本${S.name ? '｜' + esc(S.name) : ''}</h3>
-    ${item('第一個想法', esc(S.idea || '還沒寫'))}
-    ${item('第一次猜測', S.guess ? `${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）` : '還沒選')}
-    ${n ? item('拋接地球儀', `海洋 ${tallyMarks(T.ocean)}（${T.ocean}）　陸地 ${tallyMarks(T.land)}（${T.land}）`) : ''}
-    ${item('調查紀錄', S.log.length ? S.log.map(esc).join('\n') : '開始調查後，你的發現會自動記在這裡。')}
-    <div class="row"><button class="btn" data-close>關上筆記本</button><button class="btn-plain" id="cp2">複製內容</button><span class="muted" id="cpm"></span></div>`);
-  $('#cp2').onclick = copyNotebook;
+  const T = S.toss, n = T.land + T.ocean, pct = n ? Math.round(T.ocean / n * 100) : 0;
+  const { sec, text, card, bars, talks } = NB;
+  const OCEANS = ['太平洋', '大西洋', '印度洋', '北極海'];
+  const mini = (k, lab) => `<figure class="nb-fig"><figcaption>${lab}｜<b>${k}</b> 圖</figcaption>${wsSVG(GUESS[k][0], GUESS[k][1])}</figure>`;
+  const html = `
+    ${sec('我的想法改變了', `<div class="nb-two">${card('一開始', text(S.idea, '還沒寫'))}${card('現在', text(S.revised, '完成第 6 站「海洋星球？」後會出現'), 'now')}</div>`)}
+    <h4 class="nb-h">我收集到的證據</h4>
+    <div class="nb-grid">
+      ${sec('多少海洋？多少陸地？', S.guess ? `<div class="nb-guess">${mini(S.guess, '一開始')}${S.guess2 ? `<span class="nb-arrow" aria-hidden="true">→</span>${mini(S.guess2, '看了證據後')}` : ''}</div>${S.guess2 ? '' : '<p class="nb-empty">完成「拋接地球儀」後，會看到你修正後的選擇。</p>'}` : '', '完成第 2 站後會出現')}
+      ${sec('在地球儀上找到的海洋', Object.keys(S.found).length ? `<div class="nb-chips">${OCEANS.map(o => `<span class="${S.found[o] ? 'ok' : ''}">${S.found[o] ? '✓ ' : ''}${o}</span>`).join('')}</div>${S.boundary === 'no' ? '<p class="nb-text">發現：海洋之間找不到界線，全部連在一起。</p>' : ''}` : '', '完成「地球儀探索」任務 1 後會出現')}
+      ${sec('描出最長的路', S.best.ocean || S.best.land ? bars([{ t: '海洋', v: S.best.ocean, u: '公里', c: 'var(--sea)' }, { t: '陸地', v: S.best.land, u: '公里', c: 'var(--land)' }]) : '', '完成「地球儀探索」任務 2 後會出現')}
+      ${sec('拋接地球儀', n ? `<div class="tally"><span class="lbl sea">海洋</span><span class="marks">${tallyMarks(T.ocean)}</span><b>${T.ocean}</b><span class="lbl land">陸地</span><span class="marks">${tallyMarks(T.land) || '　'}</span><b>${T.land}</b></div>
+        <p class="nb-text">共拋 ${n} 次，食指落在海洋的比例是 <b style="color:var(--sea)">${pct}%</b>（科學家測量：約 71%）。</p>${chart(T.hist)}` : '', '完成第 5 站「拋接地球儀」後會出現')}
+    </div>
+    ${sec('我的結論：地球最準確的名字', S.planet ? `<p class="nb-big">${S.planet === 'ocean' ? '海洋星球' : '陸地星球'}</p>${text(S.planetWhy, '還沒寫理由')}` : '', '完成第 6 站後會出現')}
+    ${sec('我學到的關鍵概念', S.concepts.some(Boolean) ? `<div class="nb-concepts">${CONCEPTS.map((c, i) => S.concepts[i] ? `<div class="concept got">${esc(c)}</div>` : '').join('')}</div>` : '', '在調查中發現關鍵概念後，會貼在這裡')}
+    ${sec('我和海博士的討論', talks(S.ai), '請海博士看看你的想法後，對話會記在這裡')}
+    ${sec('關於海洋，我還想知道', text(S.questions, '完成第 6 站後會出現'))}`;
+  NB.open(`海洋星球｜${S.name || '調查員'}`, `<span>徽章 <b>${S.badges.filter(b => b > 0).length}</b>/6</span><span>關鍵概念 <b>${S.concepts.filter(Boolean).length}</b>/3</span>`, html, notebookText);
 }
 
 /* ---------- 啟動 ---------- */

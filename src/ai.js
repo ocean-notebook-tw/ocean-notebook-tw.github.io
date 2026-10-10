@@ -43,9 +43,10 @@ const AI = (() => {
   }
 
   /* ---------- 呼叫 API ---------- */
-  async function ask(req, qa) {
+  async function ask(req, qa, fb) {
+    const off = () => (fb && fb(req)) || local(qa, req);
     const c = cfg();
-    if (!c.endpoint) return { text: local(qa, req), offline: true };
+    if (!c.endpoint) return { text: off(), offline: true };
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), c.timeoutMs);
     try {
       const res = await fetch(c.endpoint, { method: c.method, headers: c.headers, body: JSON.stringify(c.buildBody(req)), signal: ctl.signal });
@@ -57,7 +58,7 @@ const AI = (() => {
       return { text, offline: false };
     } catch (e) {
       console.warn('[海博士 AI] 連線失敗，改用離線提示：', e);
-      return { text: local(qa, req), offline: true, failed: true };
+      return { text: off(), offline: true, failed: true };
     } finally { clearTimeout(t); }
   }
   function request(o, qa, answer, history) {
@@ -76,7 +77,7 @@ const AI = (() => {
 
   /* ---------- 回饋區塊 ---------- */
   function slot(host, o) {
-    const qa = (window.QA || {})[o.id];
+    const qa = (window.QA || {})[o.qaId || o.id];
     const store = o.store; const rec = store[o.id] || (store[o.id] = { thread: [] });
     const box = document.createElement('div'); box.className = 'ai-box'; host.appendChild(box);
     let busy = false;
@@ -105,11 +106,12 @@ const AI = (() => {
       const history = rec.thread.slice();
       rec.thread.push({ r: 's', t: text }); if (!rec.answer || !o.ask) rec.answer = answer; paint();
       const req = request(o, qa, answer, history); if (history.length) { req.mode = 'chat'; req.question_from_student = text; }
-      const r = await ask(req, qa);
+      const r = await ask(req, qa, req.mode === 'chat' ? null : o.fallback);
       busy = false; rec.thread.push({ r: 'd', t: r.text }); o.onSave && o.onSave(); paint();
       o.onReply && o.onReply(r);
     }
     paint();
+    if (o.auto && !rec.thread.length) { const a = (o.getAnswer ? o.getAnswer() : '').trim(); if (a.length >= (o.minLen || 4)) send(a, a); }
     return { reset: () => { rec.thread = []; rec.answer = ''; o.onSave && o.onSave(); paint(); } };
   }
 

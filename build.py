@@ -25,7 +25,7 @@ def main() -> None:
     for f in sorted((SRC / "content").glob("qa-*.json")):
         qa.update(json.loads(f.read_text(encoding="utf-8")))
     js = "window.QA = " + json.dumps(qa, ensure_ascii=False) + ";\n"
-    js += read("common.js") + read("ai.js") + read("art.js") + "\n"
+    js += read("common.js") + read("ai.js") + read("notebook.js") + read("art.js") + "\n"
     js += "".join(read(f) for f in UNIT_FILES)
     js += read("site.js")
     html = (

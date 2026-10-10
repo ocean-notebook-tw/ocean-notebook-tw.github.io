@@ -97,6 +97,8 @@ Access-Control-Allow-Headers: Content-Type
 |---|---|---|
 | `u11-idea` | 第一個想法，按「寫好了」後 | 回饋學生的想法 |
 | `u11-guess` | 多少海洋？記下猜測後 | 回饋猜測的理由（不透露答案） |
+| `u11-evwhy` | 證據或感覺分類，答錯後按「問海博士為什麼」 | 針對該句解釋（`student_data` 有 `sentence`、`student_choice`、`correct`） |
+| `u11-evown` | 證據分類全對後的「換你出題」 | 學生自寫一句話，AI 判斷是證據還是感覺 |
 | `u11-boundary` | 地球儀探索任務 1，答對「找不到界線」後 | 學生寫證據，AI 回饋 |
 | `u11-longest` | 地球儀探索任務 2，答對「海洋較長」後 | 學生寫想法，AI 回饋 |
 | `u11-model` | 討論模型完成後 | 學生寫見過的模型，AI 回饋 |

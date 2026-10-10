@@ -54,6 +54,7 @@ python3 build.py
 | `src/common.js` | 共用工具與學生姓名 |
 | `src/ai.js` | 海博士 AI 回饋區塊與「問海博士」對話框 |
 | `src/content/qa-1-1.json` | 1.1 各題的教材依據（預期想法、關鍵概念、提示），給 AI 與提示模式使用 |
+| `src/notebook.js` | 調查筆記本（學習成果單）與複製功能 |
 | `src/art.js` | 生物插圖 |
 | `src/unit-1-1.js` | 1.1 海洋星球 |
 | `src/unit-2-1.js` | 2.1 介紹海洋生物 |
