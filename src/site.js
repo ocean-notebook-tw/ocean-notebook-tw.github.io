@@ -36,8 +36,8 @@ function route() {
   if (current && current.stop) current.stop();
   if (UNITS[h]) {
     current = UNITS[h]; $('#home').hidden = true; $('#unitView').hidden = false; $('#homeBtn').hidden = false; $$('.unit-only').forEach(b => b.hidden = false);
-    current.start();
-  } else { current = null; showHome(); }
+    current.start(); AI.showChat(true);
+  } else { current = null; AI.showChat(false); AI.setContext(null); showHome(); }
   window.scrollTo(0, 0);
 }
 $('#homeBtn').onclick = () => { location.hash = 'home'; };

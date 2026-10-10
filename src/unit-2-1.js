@@ -92,7 +92,7 @@ function renderChrome() {
   $('#vocab').innerHTML = VOCAB.map(v => `<span class="${S.vocab.includes(v) ? 'got' : ''}">${v}</span>`).join('');
   $('#badges').innerHTML = STAGES.slice(1).map((st, k) => `<span class="badge ${S.badges.includes(k + 1) ? 'got' : ''}" title="${st.t}">${k + 1}</span>`).join('');
 }
-function render() { renderChrome(); const el = $('#stage'); el.innerHTML = ''; [stCover, stIdea, stTour, stNeeds, stReview][S.stage](el); }
+function render() { renderChrome(); AI.setContext({ unit: '2.1 介紹海洋生物', stage: STAGES[S.stage].t }); const el = $('#stage'); el.innerHTML = ''; [stCover, stIdea, stTour, stNeeds, stReview][S.stage](el); }
 
 function overlay(html, onClose) {
   const ov = document.createElement('div'); ov.className = 'ov'; ov.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">${html}</div>`;

@@ -4,6 +4,7 @@
 用法：在專案資料夾執行  python3 build.py
 （只需要 Python 3，不用安裝其他套件）
 """
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -12,19 +13,26 @@ SRC = ROOT / "src"
 # 單元檔案依順序載入；新增單元時，把檔名加在這裡，並到 src/site.js 的 UNITS 與 CATALOG 登記
 UNIT_FILES = ["unit-1-1.js", "unit-2-1.js"]
 
+# 每個單元的問答資料（給海博士 AI 參考），放在 src/content/qa-*.json
+
 
 def read(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
 
 
 def main() -> None:
-    js = read("common.js") + read("art.js") + "\n"
+    qa = {}
+    for f in sorted((SRC / "content").glob("qa-*.json")):
+        qa.update(json.loads(f.read_text(encoding="utf-8")))
+    js = "window.QA = " + json.dumps(qa, ensure_ascii=False) + ";\n"
+    js += read("common.js") + read("ai.js") + read("art.js") + "\n"
     js += "".join(read(f) for f in UNIT_FILES)
     js += read("site.js")
     html = (
         read("head.html")
         + read("body.html")
         + '<script src="vendor/d3.min.js"></script>\n'
+        + '<script src="ai-config.js"></script>\n'
         + "<script>const LAND=" + read("land-110m.geojson").strip() + ";</script>\n"
         + "<script>\n" + js + "</script>\n"
     )
