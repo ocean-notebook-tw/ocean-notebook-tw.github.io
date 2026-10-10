@@ -270,12 +270,12 @@ function stCover(el) {
       <p>地球表面有多少被海水覆蓋？世界上的海洋是彼此相連的嗎？打開你的調查筆記本，一起找出證據吧！</p></div>
     <div class="panel stack" style="gap:10px"><b>今天的調查路線</b>
       <div class="plan">
-        <span>1</span><span>寫下第一個想法</span><span class="t">約 20 分</span>
-        <span>2</span><span>多少海洋？多少陸地？</span><span class="t">5 分</span>
-        <span>3</span><span>地球儀探索（3 個任務）</span><span class="t">約 20 分</span>
-        <span>4</span><span>討論模型</span><span class="t">5 分</span>
-        <span>5</span><span>拋接地球儀</span><span class="t">約 15 分</span>
-        <span>6</span><span>海洋星球？</span><span class="t">5 分</span>
+        <span>1</span><span>寫下第一個想法</span>
+        <span>2</span><span>多少海洋？多少陸地？</span>
+        <span>3</span><span>地球儀探索（3 個任務）</span>
+        <span>4</span><span>討論模型</span>
+        <span>5</span><span>拋接地球儀</span>
+        <span>6</span><span>海洋星球？</span>
       </div></div>
   </div>
   ${guide(`<span id="hiName">${S.name ? esc(S.name) + '，' : ''}</span>你好！在這個單元裡，你會學到海洋科學家是如何<b>發現問題、推測答案</b>。接下來的時間，你要像海洋科學家一樣思考與行動。<br>科學家會用<b>調查筆記本</b>記錄觀察到的現象、想法、問題和調查結果。<span id="hiAsk">${S.name ? '確認筆記本封面上的名字，就可以開始調查了！' : '先在筆記本封面寫上你的名字吧！'}</span>`)}

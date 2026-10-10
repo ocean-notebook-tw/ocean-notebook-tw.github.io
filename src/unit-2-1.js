@@ -123,10 +123,10 @@ function stCover(el) {
       <p>海洋中有什麼生物？不同的生物需要什麼才能生存？接下來，你要像海洋科學家一樣思考和行動，認識不同類型的海洋生物和牠們的棲息地。</p></div>
     <div class="panel stack" style="gap:10px"><b>今天的調查路線</b>
       <div class="plan">
-        <span>1</span><span>寫下第一個想法</span><span class="t">20 分</span>
-        <span>2</span><span>生物之旅：調查海洋中的生物</span><span class="t">15 分</span>
-        <span>3</span><span>討論生物生存的要素</span><span class="t">25 分</span>
-        <span>4</span><span>回顧</span><span class="t">5 分</span>
+        <span>1</span><span>寫下第一個想法</span>
+        <span>2</span><span>生物之旅：調查海洋中的生物</span>
+        <span>3</span><span>討論生物生存的要素</span>
+        <span>4</span><span>回顧</span>
       </div></div>
   </div>
   <div class="row" style="justify-content:center;gap:6px">${['clownfish', 'turtle', 'jelly', 'orca', 'urchin', 'kelp'].map(k => `<div style="width:92px">${art(k, O[k] ? O[k].n : '海藻')}</div>`).join('')}</div>
