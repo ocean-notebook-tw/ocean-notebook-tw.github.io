@@ -1,0 +1,818 @@
+const UNIT11 = (() => {
+/* ===== 海洋星球 互動遊戲（依 海洋科學序列教材 G3-G5 第1.1節） ===== */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const KEY = 'ocean-planet-1-1-v1';
+const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- 狀態 ---------- */
+const fresh = () => ({
+  v: 1, name: getName(), stage: 0, maxStage: 0, badges: [],
+  idea: '', guess: null, guessWhy: '', guessTags: [], evSort: {},
+  task: 1, found: {}, targets: null, boundary: null,
+  best: { land: 0, ocean: 0 }, longest: null,
+  viewDone: false, viewAns: null,
+  modelSort: {}, modelPick: null,
+  toss: { land: 0, ocean: 0, hist: [], manual: 0, auto: 0 }, tossMeaning: null, guess2: null,
+  planet: null, planetWhy: '', revised: '', concepts: [false, false, false], vocab: [], log: [], doneAll: false
+});
+let S = load();
+  if (!S.name) S.name = getName();
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.v === 1) return Object.assign(fresh(), v); } catch (e) { } return fresh(); }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
+function log(t) { if (!S.log.includes(t)) { S.log.push(t); save(); } }
+
+/* ---------- 陸地判斷（等距圓柱投影點陣，0.18° 精度） ---------- */
+const LW = 2048, LH = 1024; let LMASK = null;
+function buildMask() {
+  const c = document.createElement('canvas'); c.width = LW; c.height = LH;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const p = d3.geoEquirectangular().scale(LW / (2 * Math.PI)).translate([LW / 2, LH / 2]);
+  g.fillStyle = '#000'; g.beginPath(); d3.geoPath(p, g)(LAND); g.fill();
+  const d = g.getImageData(0, 0, LW, LH).data; LMASK = new Uint8Array(LW * LH);
+  for (let i = 0; i < LW * LH; i++) LMASK[i] = d[i * 4 + 3] > 127 ? 1 : 0;
+}
+const normLon = l => ((l + 180) % 360 + 360) % 360 - 180;
+function isLand(lon, lat) {
+  lon = normLon(lon);
+  const x = Math.min(LW - 1, Math.max(0, Math.floor((lon + 180) / 360 * LW)));
+  const y = Math.min(LH - 1, Math.max(0, Math.floor((90 - lat) / 180 * LH)));
+  return LMASK[y * LW + x] === 1;
+}
+/* 海洋名稱（近似分區，適合國小程度的辨識） */
+function oceanName(lon, lat) {
+  lon = normLon(lon);
+  if (lon > 46.5 && lon < 55.5 && lat > 36.5 && lat < 47.5) return '裏海';
+  if (lat >= 70) return '北極海';
+  if (lat >= 66) return (lon > -45 && lon < 25) ? '大西洋' : '北極海';
+  if (lat <= -60) return '南冰洋';
+  if (lat >= 0) {
+    const b = lat < 9 ? -78 : lat < 14 ? -84 : lat < 18.5 ? -92 : -100;
+    if (lon < b || lon >= 100) return '太平洋';
+    if (lon < 20) return '大西洋';
+    if (lon < 45 && lat >= 30) return '大西洋';
+    if (lat < 30) return '印度洋';
+    return '大西洋';
+  }
+  const west = lat > -56 ? -69.5 : -67;
+  if (lon >= west && lon < 20) return '大西洋';
+  if (lon >= 20 && lon < 147) {
+    if (lat > -8 && lon >= 105) return '太平洋';
+    if (lon >= 129 && lat > -18) return '太平洋';
+    return '印度洋';
+  }
+  return '太平洋';
+}
+const randomLL = () => [Math.random() * 360 - 180, Math.asin(2 * Math.random() - 1) * 180 / Math.PI];
+
+/* ---------- 地球儀元件 ---------- */
+class Globe {
+  constructor(host, o = {}) {
+    this.o = o; this.host = host;
+    this.c = document.createElement('canvas'); this.c.className = 'globe-canvas';
+    this.c.setAttribute('role', 'img'); this.c.setAttribute('aria-label', '可以拖曳轉動的地球儀');
+    host.appendChild(this.c); this.g = this.c.getContext('2d');
+    this.rot = o.rot || [-121, -15, 0];
+    this.p = d3.geoOrthographic().clipAngle(90).precision(0.4);
+    this.path = d3.geoPath(this.p, this.g); this.grat = d3.geoGraticule10();
+    this.markers = []; this.lines = []; this.live = null; this.mode = 'rotate'; this.finger = false; this.locked = false;
+    this.size(); this.bind();
+    this.ro = new ResizeObserver(() => { if (this.size()) this.draw(); }); this.ro.observe(host);
+    this.draw();
+  }
+  size() {
+    const w = Math.floor(this.host.clientWidth || 320); const s = Math.max(240, Math.min(w, this.o.max || 500));
+    if (s === this.S) return false;
+    this.dpr = window.devicePixelRatio || 1; this.S = s; this.R = s / 2 - 6;
+    this.c.style.width = s + 'px'; this.c.style.height = s + 'px'; this.c.width = s * this.dpr; this.c.height = s * this.dpr;
+    this.p.translate([s / 2, s / 2]).scale(this.R); return true;
+  }
+  center() { return [normLon(-this.rot[0]), -this.rot[1]]; }
+  visible(ll) { return d3.geoDistance(ll, this.center()) < Math.PI / 2 - 0.02; }
+  pt(e) { const r = this.c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  ll(pt, clamp) {
+    let [x, y] = pt; const cx = this.S / 2, dx = x - cx, dy = y - cx, d = Math.hypot(dx, dy);
+    if (d > this.R) { if (!clamp) return null; x = cx + dx / d * this.R * 0.97; y = cx + dy / d * this.R * 0.97; }
+    this.p.rotate(this.rot); return this.p.invert([x, y]);
+  }
+  bind() {
+    const c = this.c; let st = null;
+    c.addEventListener('pointerdown', e => {
+      if (this.locked) return; c.setPointerCapture(e.pointerId);
+      const pt = this.pt(e); st = { x: pt[0], y: pt[1], t: performance.now(), r0: [...this.rot], moved: false, pt };
+      if (this.mode === 'draw' && this.o.onDrawStart) { this.ptr = pt; if (this.o.onDrawStart(this, pt)) { this.drawing = true; this.loop(); } }
+    });
+    c.addEventListener('pointermove', e => {
+      if (!st) return; const pt = this.pt(e); const dx = pt[0] - st.x, dy = pt[1] - st.y;
+      if (Math.hypot(dx, dy) > 6) st.moved = true;
+      if (this.mode === 'draw') { if (this.drawing) { this.ptr = pt; this.o.onDrawMove && this.o.onDrawMove(this, pt); } return; }
+      if (st.moved && !this.locked && !this.o.noDrag) {
+        const k = 90 / this.R;
+        this.rot = [st.r0[0] + dx * k, Math.max(-85, Math.min(85, st.r0[1] - dy * k)), 0];
+        this.draw(); this.o.onRotate && this.o.onRotate(this);
+      }
+    });
+    const end = () => {
+      if (!st) return;
+      if (this.mode === 'draw') { if (this.drawing) { this.drawing = false; this.o.onDrawEnd && this.o.onDrawEnd(this); } }
+      else if (!st.moved && performance.now() - st.t < 600) { const ll = this.ll(st.pt); if (ll && this.o.onTap) this.o.onTap(ll, this); }
+      st = null;
+    };
+    c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+  }
+  loop() {
+    const step = () => {
+      if (!this.drawing) return;
+      const [x, y] = this.ptr, cx = this.S / 2, dx = x - cx, dy = y - cx, d = Math.hypot(dx, dy);
+      if (d > this.R * 0.66) {
+        const k = Math.min(1.5, (d - this.R * 0.66) / (this.R * 0.3) * 1.5);
+        this.rot = [this.rot[0] - dx / d * k, Math.max(-85, Math.min(85, this.rot[1] + dy / d * k)), 0];
+        this.o.onDrawMove && this.o.onDrawMove(this, this.ptr);
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  nudge(dl, dp) { this.rot = [this.rot[0] + dl, Math.max(-85, Math.min(85, this.rot[1] + dp)), 0]; this.draw(); this.o.onRotate && this.o.onRotate(this); }
+  spinTo(ll, ms = 1800, turns = 1) {
+    return new Promise(res => {
+      const r0 = [...this.rot]; let l1 = -ll[0]; const base = r0[0] + turns * 360 * (Math.random() < .5 ? 1 : -1);
+      l1 = l1 + 360 * Math.round((base - l1) / 360); const p1 = -ll[1];
+      if (reduceMotion()) ms = 250;
+      const t0 = performance.now(); this.locked = true;
+      const f = t => {
+        const u = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - u, 3);
+        this.rot = [r0[0] + (l1 - r0[0]) * e, r0[1] + (p1 - r0[1]) * e, 0]; this.draw();
+        if (u < 1) requestAnimationFrame(f); else { this.locked = false; this.o.onRotate && this.o.onRotate(this); res(); }
+      };
+      requestAnimationFrame(f);
+    });
+  }
+  stats(n = 26) {
+    const out = { land: 0, ocean: 0, names: {} }; const cx = this.S / 2; this.p.rotate(this.rot);
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const x = (i / n) * 2 - 1, y = (j / n) * 2 - 1; if (x * x + y * y > 1) continue;
+      const ll = this.p.invert([cx + x * this.R, cx + y * this.R]); if (!ll) continue;
+      if (isLand(ll[0], ll[1])) out.land++; else { out.ocean++; const nm = oceanName(ll[0], ll[1]); out.names[nm] = (out.names[nm] || 0) + 1; }
+    }
+    out.pct = Math.round(out.ocean / (out.ocean + out.land) * 100); return out;
+  }
+  draw() {
+    const g = this.g, cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); g.clearRect(0, 0, this.S, this.S); this.p.rotate(this.rot);
+    g.beginPath(); this.path({ type: 'Sphere' }); g.fillStyle = col('--globe-sea'); g.fill();
+    g.beginPath(); this.path(this.grat); g.strokeStyle = col('--globe-grid'); g.lineWidth = .7; g.stroke();
+    g.beginPath(); this.path(LAND); g.fillStyle = col('--globe-land'); g.fill(); g.strokeStyle = col('--globe-land-edge'); g.lineWidth = .8; g.stroke();
+    const gr = g.createRadialGradient(this.S * .36, this.S * .32, this.R * .05, this.S / 2, this.S / 2, this.R);
+    gr.addColorStop(0, 'rgba(255,255,255,.22)'); gr.addColorStop(.6, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(0,0,0,.25)');
+    g.beginPath(); this.path({ type: 'Sphere' }); g.fillStyle = gr; g.fill(); g.strokeStyle = col('--globe-rim'); g.lineWidth = 2.5; g.stroke();
+    for (const L of [...this.lines, this.live].filter(Boolean)) {
+      if (L.pts.length < 2) continue;
+      g.beginPath(); this.path({ type: 'LineString', coordinates: L.pts });
+      g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 7; g.stroke();
+      g.strokeStyle = L.color; g.lineWidth = 4.5; g.stroke();
+    }
+    g.font = '600 14px ' + col('--font-body');
+    for (const m of this.markers) {
+      if (!this.visible(m.ll)) continue; const [x, y] = this.p(m.ll);
+      g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fillStyle = col('--coral'); g.fill(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
+      const w = g.measureText(m.label).width + 14; g.fillStyle = 'rgba(255,255,255,.92)';
+      g.beginPath(); g.roundRect ? g.roundRect(x + 9, y - 13, w, 24, 6) : g.rect(x + 9, y - 13, w, 24); g.fill();
+      g.fillStyle = '#14324a'; g.fillText(m.label, x + 16, y + 4);
+    }
+    if (this.finger) {
+      const c = this.S / 2; g.lineWidth = 3; g.strokeStyle = '#fff';
+      g.beginPath(); g.arc(c, c, 13, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(c - 22, c); g.lineTo(c - 8, c); g.moveTo(c + 8, c); g.lineTo(c + 22, c); g.moveTo(c, c - 22); g.lineTo(c, c - 8); g.moveTo(c, c + 8); g.lineTo(c, c + 22); g.stroke();
+      g.beginPath(); g.arc(c, c, 4, 0, Math.PI * 2); g.fillStyle = col('--coral'); g.fill();
+    }
+    this.o.onDraw && this.o.onDraw(this);
+  }
+  destroy() { this.ro.disconnect(); }
+}
+
+/* ---------- 共用片段 ---------- */
+const DOC = `<svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true">
+  <circle cx="32" cy="32" r="30" fill="var(--sea)"/>
+  <path d="M6 40 Q16 34 24 40 T42 40 T58 40 L58 50 Q32 66 6 50Z" fill="var(--sea-soft)" opacity=".9"/>
+  <circle cx="32" cy="28" r="15" fill="#f6d7b8"/>
+  <path d="M17 26 Q32 6 47 26 Q40 18 32 18 Q24 18 17 26Z" fill="#33261c"/>
+  <rect x="19" y="23" width="26" height="11" rx="5.5" fill="#bfe6f7" stroke="#14324a" stroke-width="2"/>
+  <line x1="32" y1="23" x2="32" y2="34" stroke="#14324a" stroke-width="2"/>
+  <path d="M27 38 Q32 41 37 38" stroke="#7a3b2a" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>`;
+const guide = html => `<div class="guide">${DOC}<div class="bubble"><b>海博士：</b>${html}</div></div>`;
+const head = (title, ref) => `<div class="sheet-head"><h2>${title}</h2><span class="ref">教師手冊對照｜${ref}</span></div>`;
+const tallyMarks = n => '正'.repeat(Math.floor(n / 5)) + ['', '一', '丅', '下', '止'][n % 5];
+
+const STAGES = [
+  { t: '筆記本封面', s: '封面' },
+  { t: '第一個想法', s: '第一個想法' },
+  { t: '多少海洋？多少陸地？', s: '多少海洋？' },
+  { t: '地球儀探索', s: '地球儀探索' },
+  { t: '討論模型', s: '模型' },
+  { t: '拋接地球儀', s: '拋接地球儀' },
+  { t: '海洋星球？', s: '海洋星球？' }
+];
+const CONCEPTS = ['地球只有一個海洋。', '科學家使用模型來幫助理解和解釋事物。', '地球的大部分（約71%）是被海洋覆蓋。'];
+const VOCAB = ['證據', '模型'];
+const GUESS = { A: [50, 50], B: [25, 75], C: [75, 25], D: [90, 10] };
+
+let globe = null;
+function go(i) { if (i > S.maxStage) return; S.stage = i; save(); render(); window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' }); }
+function complete(i) {
+  if (!S.badges.includes(i)) S.badges.push(i);
+  S.maxStage = Math.max(S.maxStage, Math.min(i + 1, STAGES.length - 1)); save(); renderChrome();
+}
+function nextBtn(i, label = '前往下一站') { return `<div class="row"><button class="btn" id="next">${label} →</button></div>`; }
+function bindNext(i) { const b = $('#next'); if (b) b.onclick = () => go(i + 1); }
+
+/* ---------- 版面框架 ---------- */
+function renderChrome() {
+  $('#who').textContent = S.name ? `調查員：${S.name}` : '';
+  $('#track').innerHTML = STAGES.map((st, i) => `<button class="st ${S.badges.includes(i) ? 'done' : ''} ${S.stage === i ? 'cur' : ''}" data-go="${i}" ${i > S.maxStage ? 'disabled' : ''}><span class="n">${i === 0 ? '封' : i}</span>${st.s}</button>`).join('');
+  $$('#track [data-go]').forEach(b => b.onclick = () => go(+b.dataset.go));
+  $('#wall').innerHTML = `<h3>概念牆</h3>${CONCEPTS.map((c, i) => `<div class="concept ${S.concepts[i] ? 'got' : ''}">${S.concepts[i] ? esc(c) : `關鍵概念 ${i + 1}：還沒發現`}</div>`).join('')}`;
+  $('#vocab').innerHTML = VOCAB.map(v => `<span class="${S.vocab.includes(v) ? 'got' : ''}">${v}</span>`).join('');
+  $('#badges').innerHTML = STAGES.slice(1).map((st, k) => `<span class="badge ${S.badges.includes(k + 1) ? 'got' : ''}" title="${st.t}">${k + 1}</span>`).join('');
+}
+function render() {
+  if (globe) { globe.destroy(); globe = null; }
+  renderChrome();
+  const el = $('#stage'); el.innerHTML = '';
+  [stCover, stIdea, stGuess, stExplore, stModel, stToss, stPlanet][S.stage](el);
+}
+
+/* ---------- 共用：新的關鍵概念 / 詞彙 對話框 ---------- */
+function overlay(html, onClose) {
+  const ov = document.createElement('div'); ov.className = 'ov'; ov.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(ov); const b = $('[data-close]', ov); b && b.focus();
+  $$('[data-close]', ov).forEach(x => x.onclick = () => { ov.remove(); onClose && onClose(); });
+  return ov;
+}
+function unlockConcept(i, then) {
+  if (S.concepts[i]) { then && then(); return; }
+  S.concepts[i] = true; save(); log(`發現關鍵概念：${CONCEPTS[i]}`);
+  overlay(`<h3 class="q">發現新的關鍵概念！</h3><div class="concept got">${CONCEPTS[i]}</div><p class="muted">它會貼在右邊的概念牆上，隨時可以回去複習。</p><div class="row"><button class="btn" data-close>貼到概念牆</button></div>`, () => { renderChrome(); then && then(); });
+}
+function addVocab(v, def) {
+  if (S.vocab.includes(v)) return; S.vocab.push(v); save(); renderChrome();
+  overlay(`<h3 class="q">新的科學詞彙：<span style="color:var(--sea)">${v}</span></h3><p>${def}</p><div class="row"><button class="btn" data-close>記住了</button></div>`);
+}
+
+/* ===== 0 封面 ===== */
+function stCover(el) {
+  el.innerHTML = `<div class="stack">
+  <div class="cover">
+    <div class="stack" style="gap:8px"><span class="muted" style="font-size:14px;letter-spacing:.06em">海洋科學序列教材 G3–G5 初階海洋素養｜第 1.1 節</span><h2>海洋星球</h2>
+      <p>地球表面有多少被海水覆蓋？世界上的海洋是彼此相連的嗎？打開你的調查筆記本，一起找出證據吧！</p></div>
+    <div class="panel stack" style="gap:10px"><b>今天的調查路線</b>
+      <div class="plan">
+        <span>1</span><span>寫下第一個想法</span><span class="t">約 20 分</span>
+        <span>2</span><span>多少海洋？多少陸地？</span><span class="t">5 分</span>
+        <span>3</span><span>地球儀探索（3 個任務）</span><span class="t">約 20 分</span>
+        <span>4</span><span>討論模型</span><span class="t">5 分</span>
+        <span>5</span><span>拋接地球儀</span><span class="t">約 15 分</span>
+        <span>6</span><span>海洋星球？</span><span class="t">5 分</span>
+      </div></div>
+  </div>
+  ${guide('你好！在這個單元裡，你會學到海洋科學家是如何<b>發現問題、推測答案</b>。接下來的時間，你要像海洋科學家一樣思考與行動。<br>科學家會用<b>調查筆記本</b>記錄觀察到的現象、想法、問題和調查結果。先在筆記本封面寫上你的名字吧！')}
+  <div class="panel stack" style="gap:10px">
+    <label for="nm"><b>調查筆記本　姓名</b></label>
+    <input type="text" id="nm" maxlength="20" placeholder="例如：王小海" value="${esc(S.name)}">
+    <div class="row"><button class="btn" id="open">打開筆記本，開始調查 →</button><span class="muted" id="nmh"></span></div>
+  </div></div>`;
+  $('#open').onclick = () => {
+    const v = $('#nm').value.trim(); if (!v) { $('#nmh').textContent = '請先寫上你的名字。'; $('#nm').focus(); return; }
+    S.name = v; setName(v); complete(0); go(1);
+  };
+  $('#nm').onkeydown = e => { if (e.key === 'Enter') $('#open').click(); };
+}
+
+/* ===== 1 第一個想法 ===== */
+function stIdea(el) {
+  const tips = ['水的溫度', '陽光照得到嗎', '水有多深', '水壓', '鹹不鹹', '水的流動', '海浪大小', '海底的樣子', '住了哪些生物', '水的顏色'];
+  el.innerHTML = `${head('第一個想法', 'p.8–10 寫下最初的想法 1–7')}
+  <div class="stack">
+  ${guide('寫下你現在的想法，可以幫你知道自己了解海洋多少。<b>這不會被打分數</b>。單元結束前，你會再看一次這個問題，看看自己學到了什麼。')}
+  <div class="panel stack" style="gap:10px">
+    <p class="q">在不同地方，海洋有什麼不同？</p>
+    <ul style="margin:0;padding-left:1.2em" class="muted">
+      <li>假如你走入海洋的不同區域，你會觀察並記下哪些差異？</li>
+      <li>從海面到水下深處，會有哪些差異？</li>
+      <li>從海中央到海岸邊、在夏威夷和在阿拉斯加，海洋又會有哪些不同？</li></ul>
+  </div>
+  <div class="panel timer" id="tm">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--rule)" stroke-width="6"/><circle id="arc" cx="32" cy="32" r="26" fill="none" stroke="var(--sea)" stroke-width="6" stroke-dasharray="163.4" stroke-dashoffset="0" transform="rotate(-90 32 32)" stroke-linecap="round"/><text id="sec" x="32" y="38" text-anchor="middle" font-size="16" fill="var(--ink)">60</text></svg>
+    <div class="stack" style="gap:6px"><b>安靜思考 1 分鐘</b><span class="muted" style="font-size:15px">先想一想不同部分的海洋有什麼不同，再開始寫。</span>
+      <div class="row"><button class="btn sec" id="think">開始思考</button><button class="btn-plain" id="skip">我想好了</button></div></div>
+  </div>
+  <div class="panel stack" style="gap:10px">
+    <label for="idea"><b>我的第一個想法</b>　<span class="muted" style="font-size:14px">寫越多越好，也可以舉例子，或寫你去過、知道的海洋。</span></label>
+    <textarea id="idea" placeholder="我覺得……">${esc(S.idea)}</textarea>
+    <div class="row" style="gap:6px"><span class="muted" style="font-size:14px">想不到的話，可以從這些角度想想看：</span>${tips.map(t => `<button class="chip" data-tip="${t}">${t}</button>`).join('')}</div>
+    <div class="row"><button class="btn" id="saveIdea">寫好了，放進筆記本</button><span class="muted" id="cnt"></span></div>
+  </div>
+  <div id="after"></div></div>`;
+  const ta = $('#idea'), cnt = () => $('#cnt').textContent = `已寫 ${ta.value.trim().length} 字`;
+  ta.oninput = () => { S.idea = ta.value; save(); cnt(); }; cnt();
+  $$('[data-tip]').forEach(b => b.onclick = () => { ta.value += (ta.value && !/\n$/.test(ta.value) ? '\n' : '') + b.dataset.tip + '：'; ta.focus(); ta.oninput(); });
+  let tmr = null;
+  $('#think').onclick = () => {
+    if (tmr) return; let s = 60; $('#think').disabled = true;
+    tmr = setInterval(() => { s--; $('#sec').textContent = s; $('#arc').setAttribute('stroke-dashoffset', 163.4 * (1 - s / 60)); if (s <= 0) { clearInterval(tmr); $('#tm .muted').textContent = '時間到！開始寫下你的想法吧。'; ta.focus(); } }, 1000);
+  };
+  $('#skip').onclick = () => { clearInterval(tmr); ta.focus(); };
+  $('#saveIdea').onclick = () => {
+    if (ta.value.trim().length < 5) { $('#cnt').textContent = '再多寫一點點吧（至少 5 個字）。'; return; }
+    S.idea = ta.value.trim(); log('寫下了第一個想法'); complete(1);
+    $('#after').innerHTML = `<div class="stack"><div class="fb ok">已經放進筆記本了！隨時可以按上方的「我的筆記本」回來看。</div>${nextBtn(1)}</div>`; bindNext(1);
+  };
+  if (S.badges.includes(1)) { $('#after').innerHTML = nextBtn(1); bindNext(1); }
+}
+
+/* ===== 2 多少海洋？多少陸地？ ===== */
+function wsSVG(land, sea) {
+  const W = 200, H = 90, x = W * land / 100;
+  return `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="var(--sheet)" stroke="var(--ink)" stroke-width="1.2"/>
+    <rect x="${x}" y="50" width="${W - x - 1}" height="${H - 51}" fill="var(--sea-soft)"/>
+    <path d="M1 40 Q${x * .3} 36 ${x * .55} 42 T${x} 50" fill="none" stroke="var(--ink)" stroke-width="1.2"/>
+    <path d="M${x} 50 ${Array.from({ length: Math.max(1, Math.floor((W - x) / 12)) }, (_, i) => `q3 -4 6 0 q3 4 6 0`).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="1"/>
+    <line x1="${x}" y1="4" x2="${x}" y2="${H - 2}" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="${x / 2}" y="24" text-anchor="middle" font-size="12" fill="var(--ink)">${land}% 陸地</text>
+    <text x="${x + (W - x) / 2}" y="24" text-anchor="middle" font-size="12" fill="var(--sea)">${sea}% 海水</text></svg>`;
+}
+function stGuess(el) {
+  const ST = [
+    ['我感覺地球大部分被海洋覆蓋。', 'f'],
+    ['在地球儀上，藍色的部分看起來比黃色的部分多很多。', 'e'],
+    ['我覺得陸地應該比較多，因為我住在陸地上。', 'f'],
+    ['拋接地球儀 20 次，食指有 14 次落在海洋上。', 'e'],
+    ['藍色是我最喜歡的顏色，所以海洋一定很大。', 'f'],
+    ['從太空拍的地球照片中，大部分是藍色的。', 'e']];
+  const why = ['我在地圖上看過', '我在地球儀上看過', '我在電視或書上看過', '我感覺是這樣', '我猜的'];
+  el.innerHTML = `${head('多少海洋？多少陸地？', 'p.10 地球儀探索 1–2；投影片 1-1')}
+  <div class="stack">
+  <div class="panel stack" style="gap:12px">
+    <p class="q">哪張圖最能說明地球表面的水域與陸地的面積比例？</p>
+    <div class="abcd">${Object.entries(GUESS).map(([k, v]) => `<button class="choice ${S.guess === k ? 'on' : ''}" data-g="${k}"><span class="lab">${k}</span>${wsSVG(v[0], v[1])}</button>`).join('')}</div>
+    <div id="whyBox" ${S.guess ? '' : 'hidden'} class="stack" style="gap:8px">
+      <b>你為什麼這樣想？</b>
+      <div class="row" style="gap:6px">${why.map(w => `<button class="chip ${S.guessTags.includes(w) ? 'on' : ''}" data-w="${w}">${w}</button>`).join('')}</div>
+      <input type="text" id="gw" placeholder="也可以自己寫理由" value="${esc(S.guessWhy)}">
+      <div class="row"><button class="btn" id="lock">記下我的想法</button></div>
+      <div id="lockFb"></div>
+    </div>
+  </div>
+  <div id="evi" ${S.guess && S.guessLocked ? '' : 'hidden'} class="stack">
+    ${guide('你選的答案對不對，我們先不急著知道。科學家會<b>尋找線索來幫助解釋事情和回答問題，這些線索被稱為證據</b>。<br>像「我感覺地球大部分被海洋覆蓋」這種感覺或看法，就<b>不是</b>證據。')}
+    <div class="panel stack" style="gap:12px"><p class="q">哪些是證據？哪些只是感覺或看法？</p>
+      <div class="cards">${ST.map(([t, a], i) => {
+        const v = S.evSort[i]; const cls = v ? (v === a ? 'right' : 'wrong') : '';
+        return `<div class="card ${cls}" data-i="${i}"><span>${t}</span><div class="row"><button class="choice" data-s="e">證據</button><button class="choice" data-s="f">感覺或看法</button></div><span class="fbx muted" style="font-size:14px">${v ? (v === a ? '答對了！' : '再想想看：這是測量或觀察得來的資訊嗎？') : ''}</span></div>`;
+      }).join('')}</div>
+    </div>
+    <div id="after2"></div>
+  </div></div>`;
+  $$('[data-g]').forEach(b => b.onclick = () => { S.guess = b.dataset.g; save(); $$('[data-g]').forEach(x => x.classList.toggle('on', x === b)); $('#whyBox').hidden = false; });
+  $$('[data-w]').forEach(b => b.onclick = () => { const w = b.dataset.w; S.guessTags = S.guessTags.includes(w) ? S.guessTags.filter(x => x !== w) : [...S.guessTags, w]; b.classList.toggle('on'); save(); });
+  $('#gw').oninput = e => { S.guessWhy = e.target.value; save(); };
+  $('#lock').onclick = () => {
+    S.guessLocked = true; save(); log(`第一次猜測：選了 ${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）`);
+    $('#lockFb').innerHTML = `<div class="fb info">已記下：你選了 <b>${S.guess}</b>。等一下我們會用證據來檢查它！</div>`;
+    $('#evi').hidden = false; addVocab('證據', '證據就是資訊，例如測量或觀察得來的資訊，可以幫助我們解釋事物或回答問題。');
+  };
+  const check = () => {
+    const allRight = ST.every(([, a], i) => S.evSort[i] === a);
+    if (allRight) {
+      complete(2);
+      $('#after2').innerHTML = `<div class="stack"><div class="fb ok">全部分對了！接下來，我們要用<b>地球儀</b>來找出「海水和陸地各覆蓋多少地球」的證據。</div>${nextBtn(2)}</div>`; bindNext(2);
+    }
+  };
+  $$('.card[data-i]').forEach(card => {
+    const i = +card.dataset.i, a = ST[i][1];
+    $$('[data-s]', card).forEach(b => b.onclick = () => {
+      S.evSort[i] = b.dataset.s; save(); const ok = b.dataset.s === a;
+      card.classList.toggle('right', ok); card.classList.toggle('wrong', !ok);
+      $('.fbx', card).textContent = ok ? (a === 'e' ? '答對了！這是觀察或測量得來的資訊。' : '答對了！這只是感覺或看法。') : '再想想看：這是測量或觀察得來的資訊嗎？';
+      check();
+    });
+  });
+  check();
+}
+
+/* ===== 3 地球儀探索 ===== */
+function stExplore(el) {
+  const T = S.task;
+  const can2 = S.boundary === 'no', can3 = S.longest === 'ocean';
+  el.innerHTML = `${head('地球儀探索', 'p.10–12 地球儀探索 3–10')}
+  <div class="stack">
+  ${guide('這是你的電子地球儀。<b>用手指拖曳</b>就能轉動它，也可以按「隨機轉動」。先自由轉一轉，看看能發現什麼，再完成下面三個任務。')}
+  <div class="tabs" role="tablist">
+    <button class="tab ${T === 1 ? 'on' : ''}" data-t="1">任務 1　找出海洋</button>
+    <button class="tab ${T === 2 ? 'on' : ''}" data-t="2" ${can2 ? '' : 'disabled'}>任務 2　描出最長的路</button>
+    <button class="tab ${T === 3 ? 'on' : ''}" data-t="3" ${can3 ? '' : 'disabled'}>任務 3　大部分是水</button>
+  </div>
+  <div class="globe-area">
+    <div class="globe-host"><div class="globe-box" id="gb"></div>
+      <div class="row" id="gctl"><button class="btn sec" id="spin">隨機轉動</button>
+        <div class="pad" aria-label="轉動按鈕"><span></span><button data-n="0,-15" aria-label="往北轉">↑</button><span></span><button data-n="15,0" aria-label="往西轉">←</button><button data-n="0,15" aria-label="往南轉">↓</button><button data-n="-15,0" aria-label="往東轉">→</button></div></div>
+    </div>
+    <div class="stack" id="tp" style="min-width:0"></div>
+  </div>
+  <div id="after3"></div></div>`;
+  $$('[data-t]').forEach(b => b.onclick = () => { S.task = +b.dataset.t; save(); render(); });
+  const opts = { rot: [-150, 0, 0] };
+  globe = new Globe($('#gb'), opts);
+  $('#spin').onclick = () => globe.spinTo(randomLL(), 1600, 1);
+  $$('[data-n]').forEach(b => b.onclick = () => { const [a, c] = b.dataset.n.split(',').map(Number); globe.nudge(a, c); });
+  [task1, task2, task3][T - 1]($('#tp'), opts);
+}
+function task1(tp) {
+  const ALL = ['太平洋', '大西洋', '印度洋', '北極海'];
+  if (!S.targets) { S.targets = shuffle(ALL); save(); }
+  globe.markers = Object.entries(S.found).map(([k, ll]) => ({ ll, label: k })); globe.draw();
+  const cur = () => S.targets.find(t => !S.found[t]);
+  const paint = msg => {
+    const c = cur();
+    tp.innerHTML = `<div class="panel stack" style="gap:10px">
+      <b>任務 1：說出不同海洋區域的名稱</b>
+      <p>在地球儀上找出這些區域，找到了就<b>點一下</b>它。</p>
+      <div class="targets">${S.targets.map(t => `<span class="tg ${S.found[t] ? 'done' : t === c ? 'cur' : ''}">${S.found[t] ? '✓ ' : ''}${t}</span>`).join('')}</div>
+      ${c ? `<p class="q">請找出：<span style="color:var(--coral)">${c}</span></p>` : ''}
+      <div id="msg">${msg || ''}</div></div>
+      <div id="bq"></div>`;
+    if (!c) boundaryQ();
+  };
+  const boundaryQ = () => {
+    const ans = S.boundary;
+    $('#bq').innerHTML = `<div class="panel stack" style="gap:10px">
+      <p class="q">你可以找到太平洋終點和大西洋起點的確切界線嗎？</p>
+      <p class="muted">轉一轉地球儀，沿著兩片海洋找找看，它們中間有沒有一條清楚的線？</p>
+      <div class="row"><button class="choice ${ans === 'yes' ? 'wrong' : ''}" data-b="yes">YES，找得到</button><button class="choice ${ans === 'no' ? 'right' : ''}" data-b="no">NO，找不到</button></div>
+      <div id="bfb">${ans === 'no' ? okBoundary() : ans === 'yes' ? noBoundary() : ''}</div></div>`;
+    const t2 = $('#toT2'); if (t2) t2.onclick = () => { S.task = 2; save(); render(); };
+    $$('[data-b]').forEach(b => b.onclick = () => {
+      S.boundary = b.dataset.b; save();
+      if (S.boundary === 'no') { log('發現：海洋之間沒有確切的界線，所有海洋都連在一起'); unlockConcept(0, () => render()); }
+      else { $$('[data-b]').forEach(x => x.className = 'choice' + (x === b ? ' wrong' : '')); $('#bfb').innerHTML = noBoundary(); }
+    });
+  };
+  const okBoundary = () => `<div class="fb ok">沒錯！海洋之間<b>沒有邊界</b>，水可以從一個海洋流到另一個海洋。科學家把這些海盆叫做「大洋」，但其實它們只是<b>同一個大海洋的不同部分</b>。</div><div class="row"><button class="btn" id="toT2">前往任務 2 →</button></div>`;
+  const noBoundary = () => `<div class="fb no">真的嗎？試著從太平洋往南、再往東轉，沿著南美洲最南端看看。海水是不是一直連在一起，沒有斷開？</div>`;
+  globe.o.onTap = ll => {
+    const c = cur(); if (!c) return;
+    if (isLand(ll[0], ll[1])) { paint(`<div class="fb no">這裡是陸地喔！要點在藍色的海洋上。</div>`); return; }
+    const nm = oceanName(ll[0], ll[1]);
+    if (nm === c) {
+      S.found[c] = ll; save(); log(`在地球儀上找到了${c}`);
+      globe.markers.push({ ll, label: c }); globe.draw();
+      paint(`<div class="fb ok">找到了！這裡是<b>${c}</b>。${cur() ? '' : '四個海洋區域都找到了！'}</div>`);
+    } else if (nm === '裏海') paint(`<div class="fb info">這裡是裏海，它其實是一個很大的湖，被陸地包圍。再找找看<b>${c}</b>！</div>`);
+    else paint(`<div class="fb no">這裡是<b>${nm}</b>，不是${c}。轉一轉地球儀，再找找看！</div>`);
+  };
+  paint(S.found[S.targets[0]] ? '' : `<div class="fb info">小提示：北極海在地球儀的最上面，字很小，要仔細看喔！</div>`);
+}
+function task2(tp) {
+  let mode = S._dmode || 'land';
+  const colors = { land: 'var(--warn)', ocean: '#ffffff' };
+  const realColor = m => m === 'land' ? getComputedStyle(document.documentElement).getPropertyValue('--coral').trim() : '#ffffff';
+  globe.mode = 'draw'; globe.c.classList.add('drawmode');
+  let cur = null, curLen = 0, broke = '';
+  const km = pts => { let s = 0; for (let i = 1; i < pts.length; i++) s += d3.geoDistance(pts[i - 1], pts[i]); return Math.round(s * 6371); };
+  const fmt = n => n.toLocaleString('zh-TW');
+  const paint = () => {
+    tp.innerHTML = `<div class="panel stack" style="gap:10px">
+      <b>任務 2：在地球儀上描繪陸地和海洋最長的路線</b>
+      <p>用手指在地球儀上描繪，<b>手指不能離開地球儀</b>，越遠越好。手指移到地球儀邊緣，地球儀就會跟著轉。</p>
+      <div class="row"><button class="choice ${mode === 'land' ? 'on' : ''}" data-m="land">描繪陸地</button><button class="choice ${mode === 'ocean' ? 'on' : ''}" data-m="ocean">描繪海洋</button></div>
+      <div class="kv"><span>這一次</span><span class="big" id="nowLen">${fmt(curLen)} 公里</span>
+        <span>陸地最長</span><span><b>${fmt(S.best.land)}</b> 公里</span><span>海洋最長</span><span><b>${fmt(S.best.ocean)}</b> 公里</span></div>
+      <div id="dmsg">${broke}</div></div><div id="lq"></div>`;
+    $$('[data-m]').forEach(b => b.onclick = () => { mode = S._dmode = b.dataset.m; broke = ''; paint(); });
+    if (S.best.land > 0 && S.best.ocean > 0) longQ();
+  };
+  const longQ = () => {
+    const a = S.longest;
+    $('#lq').innerHTML = `<div class="panel stack" style="gap:10px"><p class="q">你能在陸地或海洋中的哪一個，描出較長的路？</p>
+      <div class="row"><button class="choice ${a === 'land' ? 'wrong' : ''}" data-l="land">陸地</button><button class="choice ${a === 'ocean' ? 'right' : ''}" data-l="ocean">海洋</button></div><div id="lfb">${a === 'ocean' ? okLong() : ''}</div></div>`;
+    $$('[data-l]').forEach(b => b.onclick = () => {
+      S.longest = b.dataset.l; save();
+      if (S.longest === 'ocean') { log(`描繪路線：海洋最長 ${fmt(S.best.ocean)} 公里，陸地最長 ${fmt(S.best.land)} 公里`); $$('[data-l]').forEach(x => x.className = 'choice' + (x.dataset.l === 'ocean' ? ' right' : '')); $('#lfb').innerHTML = okLong(); $('#toT3').onclick = () => { S.task = 3; save(); render(); }; }
+      else {
+        $$('[data-l]').forEach(x => x.className = 'choice' + (x === b ? ' wrong' : ''));
+        $('#lfb').innerHTML = `<div class="fb no">${S.best.land > S.best.ocean ? `你的陸地路線比較長，但海洋其實可以描得更遠喔！試試沿著南極洲外圍的海洋，繞地球一整圈。` : `看看你的證據：海洋路線 ${fmt(S.best.ocean)} 公里，陸地路線 ${fmt(S.best.land)} 公里。哪一個比較長？`}</div>`;
+      }
+    });
+    if (a === 'ocean') $('#toT3').onclick = () => { S.task = 3; save(); render(); };
+  };
+  const okLong = () => `<div class="fb ok">沒錯！陸地被海洋隔開，很快就描到盡頭；海洋<b>全部相連，而且很大</b>，可以一直描下去。</div><div class="row"><button class="btn" id="toT3">前往任務 3 →</button></div>`;
+  globe.o.onDrawStart = (g, pt) => {
+    const ll = g.ll(pt); if (!ll) return false;
+    const land = isLand(ll[0], ll[1]);
+    if ((mode === 'land') !== land) { broke = `<div class="fb no">要從${mode === 'land' ? '陸地' : '海洋'}開始描喔！</div>`; $('#dmsg').innerHTML = broke; return false; }
+    cur = { pts: [ll], color: realColor(mode) }; g.live = cur; curLen = 0; broke = ''; $('#dmsg').innerHTML = ''; g.draw(); return true;
+  };
+  globe.o.onDrawMove = (g, pt) => {
+    if (!cur) return; const ll = g.ll(pt, true); if (!ll) return;
+    const last = cur.pts[cur.pts.length - 1]; const d = d3.geoDistance(last, ll); if (d < 0.004) { g.draw(); return; }
+    const steps = Math.ceil(d / 0.004), it = d3.geoInterpolate(last, ll);
+    for (let s = 1; s <= steps; s++) {
+      const q = it(s / steps);
+      if (isLand(q[0], q[1]) !== (mode === 'land')) {
+        cur.pts.push(q); finish(`<div class="fb no">${mode === 'land' ? '碰到海了！' : '碰到陸地了！'}這條路線結束了，長度 ${fmt(km(cur.pts))} 公里。再試一次，看能不能更長！</div>`); g.drawing = false; return;
+      }
+    }
+    cur.pts.push(ll); curLen = km(cur.pts); const n = $('#nowLen'); if (n) n.textContent = fmt(curLen) + ' 公里'; g.draw();
+  };
+  const finish = msg => {
+    if (!cur) return; const L = km(cur.pts); curLen = L;
+    if (L > S.best[mode]) { S.best[mode] = L; save(); }
+    globe.lines = [cur]; globe.live = null; cur = null; broke = msg || `<div class="fb info">手指離開了！這條路線長 ${fmt(L)} 公里。</div>`; globe.draw(); paint();
+  };
+  globe.o.onDrawEnd = () => finish();
+  paint();
+}
+function task3(tp) {
+  const OPTS = ['太平洋', '大西洋', '印度洋', '北極海'];
+  let reached = S.viewDone, dom = null;
+  const paint = st => {
+    const ans = S.viewAns;
+    tp.innerHTML = `<div class="panel stack" style="gap:10px">
+      <b>任務 3：大部分是水的看法</b>
+      <p>轉動地球儀，讓你<b>眼前看到的幾乎都是水</b>，越多越好！目標：海洋超過 85%。</p>
+      <div class="meter" aria-hidden="true"><i id="mi" style="width:${st.pct}%"></i></div>
+      <div class="row" style="justify-content:space-between"><span style="color:var(--sea)"><b>海洋 <span id="mp">${st.pct}</span>%</b></span><span style="color:var(--warn)"><b>陸地 <span id="ml">${100 - st.pct}</span>%</b></span></div>
+      <div id="vmsg"></div></div><div id="vq"></div>`;
+    if (reached) viewQ();
+  };
+  const viewQ = () => {
+    const ans = S.viewAns, right = S.viewRight;
+    $('#vq').innerHTML = `<div class="panel stack" style="gap:10px"><p class="q">你看到的是哪一片海洋呢？</p>
+      <div class="row">${OPTS.map(o => `<button class="choice ${ans === o ? (o === right ? 'right' : 'wrong') : ''}" data-v="${o}">${o}</button>`).join('')}</div><div id="vfb">${ans && ans === right ? okView() : ''}</div></div>`;
+    $$('[data-v]').forEach(b => b.onclick = () => {
+      S.viewAns = b.dataset.v; save();
+      if (S.viewAns === S.viewRight) { log(`轉動地球儀找到幾乎都是水的一面：${S.viewRight}`); viewQ(); bindFinish(); }
+      else { $$('[data-v]').forEach(x => x.className = 'choice' + (x === b ? ' wrong' : '')); $('#vfb').innerHTML = `<div class="fb no">再看看地球儀正中間，那一大片藍色是哪一個海洋？</div>`; }
+    });
+    if (ans === right) bindFinish();
+  };
+  const okView = () => `<div class="fb ok">答對了！地球上有好大一部分都是水，像<b>太平洋</b>就大到可以佔滿地球儀的一整面。很多地圖只畫出一個或幾個國家，即使是世界地圖，也常常把海洋縮小了，所以我們常常低估海洋有多大。</div>
+      <div class="fb info"><b>想一想：</b>一開始你覺得地球上有多少是海洋？如果證據和你原本的想法不一樣，<b>根據證據改變想法，就是科學思維</b>。</div>
+      <div class="row"><button class="btn" id="fin3">完成地球儀探索 →</button></div>`;
+  const bindFinish = () => { const b = $('#fin3'); if (b) b.onclick = () => { complete(3); go(4); }; };
+  const upd = g => {
+    const st = g.stats(); const mp = $('#mp');
+    if (mp) { mp.textContent = st.pct; $('#ml').textContent = 100 - st.pct; $('#mi').style.width = st.pct + '%'; }
+    if (!reached && st.pct >= 85) {
+      reached = true; S.viewDone = true;
+      const names = Object.entries(st.names).filter(([k]) => OPTS.includes(k)).sort((a, b) => b[1] - a[1]);
+      S.viewRight = names.length ? names[0][0] : '太平洋'; save();
+      $('#vmsg').innerHTML = `<div class="fb ok">太厲害了！你眼前有 ${st.pct}% 都是海洋。</div>`; viewQ();
+    } else if (!reached) $('#vmsg').innerHTML = st.pct >= 70 ? `<div class="fb info">快到了！再轉一點點。</div>` : '';
+  };
+  let pend = false; globe.o.onRotate = g => { if (pend) return; pend = true; requestAnimationFrame(() => { pend = false; upd(g); }); };
+  paint(globe.stats()); upd(globe);
+}
+
+/* ===== 4 討論模型 ===== */
+function stModel(el) {
+  const CARDS = [
+    ['形狀是圓的', 'y'], ['各大洲之間的大小比例差不多', 'y'], ['有顯示海洋和陸地的面積', 'y'],
+    ['比真的地球小很多', 'n'], ['是塑膠做的、裡面充滿空氣', 'n'], ['可以拿在手上丟來丟去', 'n'], ['摸起來平平的，沒有高山和深海', 'n']];
+  const MODELS = [['地球儀', 'globe'], ['世界地圖', 'world'], ['台灣地圖', 'tw']];
+  el.innerHTML = `${head('討論模型', 'p.14 討論模型 1–4；p.15 科學筆記')}
+  <div class="stack">
+  ${guide('<b>模型</b>可以幫助科學家透過簡化或顯而易見的方式，去理解事物。地球儀就是地球的模型！科學家也會用地圖、電腦程式或塑膠模型，來表示地球的全部或一部分。')}
+  <div class="panel stack" style="gap:12px"><p class="q">地球儀哪裡像真實的地球？哪裡不像？</p>
+    <div class="cards">${CARDS.map(([t, a], i) => {
+      const v = S.modelSort[i]; return `<div class="card ${v ? (v === a ? 'right' : 'wrong') : ''}" data-i="${i}"><span>${t}</span><div class="row"><button class="choice" data-s="y">像真實地球</button><button class="choice" data-s="n">不像</button></div></div>`;
+    }).join('')}</div>
+    <div id="mfb"></div></div>
+  <div id="m2" hidden class="panel stack" style="gap:12px"><p class="q">想看出「海洋有多大」，哪一種模型最適合？</p>
+    <div class="row">${MODELS.map(([t, k]) => `<button class="choice ${S.modelPick === k ? (k === 'globe' ? 'right' : 'wrong') : ''}" data-p="${k}">${t}</button>`).join('')}</div><div id="pfb"></div></div>
+  <div id="after4"></div></div>`;
+  const check = () => {
+    if (CARDS.every(([, a], i) => S.modelSort[i] === a)) {
+      $('#mfb').innerHTML = `<div class="fb ok">全部分對了！模型沒辦法和真實的東西一模一樣。不過，正因為地球儀比地球小很多，我們反而<b>更容易看到海洋覆蓋了多少地球</b>，以及地球上有多少陸地。</div>`;
+      $('#m2').hidden = false; pick();
+    }
+  };
+  const pick = () => {
+    if (S.modelPick === 'globe') {
+      $('#pfb').innerHTML = `<div class="fb ok">沒錯！地圖常常只畫一個國家，或把海洋縮小；地球儀能顯示所有廣闊的海洋區域。科學家會為了不同目的，選擇不同的模型，世界上沒有一種模型可以滿足所有目的。</div>`;
+      if (!S.concepts[1]) unlockConcept(1, () => { addVocab('模型', '模型是用簡化的方式來呈現真實事物（例如物件或過程），像地球儀、地圖、電腦程式都是模型。'); done(); }); else done();
+    } else if (S.modelPick) $('#pfb').innerHTML = `<div class="fb no">${S.modelPick === 'tw' ? '台灣地圖只畫出一小塊地方，看不到整個海洋喔。' : '世界地圖可以看到全世界，但常常把海洋畫得比較小，邊緣也被切開了。'}再想想看！</div>`;
+  };
+  const done = () => { complete(4); log('討論模型：地球儀是地球的模型，有像也有不像的地方'); $('#after4').innerHTML = nextBtn(4); bindNext(4); };
+  $$('.card[data-i]').forEach(card => {
+    const i = +card.dataset.i, a = CARDS[i][1];
+    $$('[data-s]', card).forEach(b => b.onclick = () => { S.modelSort[i] = b.dataset.s; save(); const ok = b.dataset.s === a; card.classList.toggle('right', ok); card.classList.toggle('wrong', !ok); check(); });
+  });
+  $$('[data-p]').forEach(b => b.onclick = () => { S.modelPick = b.dataset.p; save(); $$('[data-p]').forEach(x => x.className = 'choice' + (x === b ? (x.dataset.p === 'globe' ? ' right' : ' wrong') : '')); pick(); });
+  check();
+}
+
+/* ===== 5 拋接地球儀 ===== */
+function stToss(el) {
+  const T = S.toss;
+  el.innerHTML = `${head('拋接地球儀', 'p.14–16 拋接地球儀活動 1–8；p.17 處理非預期的結果')}
+  <div class="stack">
+  ${guide('科學家擁有越多能用來解釋的證據，就越有信心。我們來收集更多證據！<br>按下「拋出地球儀」，地球儀會隨機轉動後停下來。<b>白色準心就是你右手食指碰到的地方</b>，判斷它落在陸地還是海洋。要公平喔，結果全憑機率！')}
+  <div class="globe-area">
+    <div class="globe-host"><div class="globe-box" id="gb"></div>
+      <div class="row"><button class="btn" id="toss">拋出地球儀！</button><button class="btn ghost" id="auto" hidden>快速拋 20 次</button></div>
+      <div id="ask" class="stack" style="gap:8px;align-items:center"></div>
+    </div>
+    <div class="stack" style="min-width:0">
+      <div class="panel stack" style="gap:10px"><b>記錄板（用「正」字記錄）</b>
+        <div class="tally" id="tally"></div></div>
+      <div class="panel stack" style="gap:6px"><b>食指落在海洋的比例</b><span class="muted" style="font-size:14px">拋越多次，結果越可靠。</span><div id="chart"></div></div>
+    </div>
+  </div>
+  <div id="mean"></div>
+  <div id="after5"></div></div>`;
+  globe = new Globe($('#gb'), { rot: [-121, -23, 0], noDrag: true }); globe.finger = true; globe.draw();
+  globe.mode = 'none';
+  let phase = 'ready';
+  const pct = () => { const n = T.land + T.ocean; return n ? Math.round(T.ocean / n * 100) : 0; };
+  const paintTally = () => {
+    const n = T.land + T.ocean;
+    $('#tally').innerHTML = `<span class="lbl land">陸地</span><span class="marks">${tallyMarks(T.land) || '　'}</span><b>${T.land}</b>
+      <span class="lbl sea">海洋</span><span class="marks">${tallyMarks(T.ocean) || '　'}</span><b>${T.ocean}</b>
+      <span>合計</span><span class="muted">海洋佔 <b style="color:var(--sea)">${pct()}%</b></span><b>${n}</b>`;
+    $('#chart').innerHTML = chart(T.hist);
+    $('#auto').hidden = T.manual < 10;
+    if (n >= 30) meaning();
+    else $('#mean').innerHTML = `<div class="fb info">已經拋了 ${n} 次。${T.manual < 10 ? `再自己拋 ${10 - T.manual} 次，就能使用「快速拋 20 次」。` : ''}收集到 30 次以上的證據，就可以開始分析結果。</div>`;
+  };
+  const record = type => { T[type]++; T.hist.push(Math.round(T.ocean / (T.land + T.ocean) * 1000) / 10); save(); };
+  $('#toss').onclick = async () => {
+    if (phase !== 'ready') return; phase = 'spin'; $('#toss').disabled = true; $('#ask').innerHTML = '';
+    await globe.spinTo(randomLL(), 1700, 2);
+    phase = 'ask';
+    $('#ask').innerHTML = `<b>你的右手食指碰到哪裡？</b><div class="row"><button class="choice" data-a="land">陸地</button><button class="choice" data-a="ocean">海洋</button></div>`;
+    $$('[data-a]').forEach(b => b.onclick = () => {
+      if (phase !== 'ask') return; phase = 'ready';
+      const c = globe.center(), truth = isLand(c[0], c[1]) ? 'land' : 'ocean', ok = b.dataset.a === truth;
+      record(truth); T.manual++; save();
+      $('#ask').innerHTML = `<div class="fb ${ok ? 'ok' : 'no'}">${ok ? '判斷正確！' : '仔細看，準心其實落在' + (truth === 'land' ? '陸地' : '海洋') + '上。'}已記錄一筆「${truth === 'land' ? '陸地' : '海洋'}」。</div>`;
+      $('#toss').disabled = false; paintTally();
+    });
+  };
+  $('#auto').onclick = async () => {
+    $('#auto').disabled = true; $('#toss').disabled = true;
+    for (let i = 0; i < 20; i++) { const ll = randomLL(); record(isLand(ll[0], ll[1]) ? 'land' : 'ocean'); T.auto++; }
+    save(); await globe.spinTo(randomLL(), 900, 1); paintTally(); $('#auto').disabled = false; $('#toss').disabled = false;
+    $('#ask').innerHTML = `<div class="fb info">已自動拋接 20 次，結果加進記錄板了。</div>`;
+  };
+  function meaning() {
+    const p = pct(), m = S.tossMeaning, n = T.land + T.ocean;
+    const odd = p < 55;
+    const OPT = [['land', '地球大部分被陸地覆蓋'], ['ocean', '地球大部分被海洋覆蓋'], ['same', '海洋和陸地一樣多']];
+    $('#mean').innerHTML = `<div class="panel stack" style="gap:10px">
+      <p class="q">拋了 ${n} 次，食指落在海洋的比例是 ${p}%。這個證據表示什麼？</p>
+      ${odd ? `<div class="fb info">結果和你在地球儀上看到的不太一樣？別擔心，拋接地球儀有<b>機率</b>的成分，次數越多結果越可靠。再多拋幾次看看！科學家也常常遇到互相矛盾的證據。</div>` : ''}
+      <div class="row">${OPT.map(([k, t]) => `<button class="choice ${m === k ? (k === 'ocean' ? 'right' : 'wrong') : ''}" data-m="${k}">${t}</button>`).join('')}</div>
+      <div id="mfb2"></div></div><div id="rev"></div>`;
+    $$('[data-m]').forEach(b => b.onclick = () => { S.tossMeaning = b.dataset.m; save(); meaning(); });
+    if (m === 'ocean') revisit(); else if (m) $('#mfb2').innerHTML = `<div class="fb no">看看記錄板：海洋的「正」字比陸地多還是少？</div>`;
+  }
+  function revisit() {
+    const g0 = S.guess, g2 = S.guess2;
+    $('#rev').innerHTML = `<div class="panel stack" style="gap:12px">
+      <p class="q">我們的想法如何改變？</p>
+      <p>你一開始選了 <b>${g0 || '（沒有選）'}</b>${g0 ? `（陸地 ${GUESS[g0][0]}%、海水 ${GUESS[g0][1]}%）` : ''}。看了這些證據，現在你覺得哪一張最接近？</p>
+      <div class="abcd">${Object.entries(GUESS).map(([k, v]) => `<button class="choice ${g2 === k ? (k === 'B' ? 'right' : 'wrong') : ''}" data-r="${k}"><span class="lab">${k}</span>${wsSVG(v[0], v[1])}</button>`).join('')}</div>
+      <div id="rfb"></div></div>`;
+    $$('[data-r]').forEach(b => b.onclick = () => {
+      S.guess2 = b.dataset.r; save();
+      if (S.guess2 === 'B') { log(`拋接地球儀 ${T.land + T.ocean} 次：海洋 ${T.ocean} 次、陸地 ${T.land} 次（海洋 ${pct()}%）`); log(`修正後的猜測：${g0 || '—'} → B`); }
+      revisit();
+    });
+    if (g2 === 'B') {
+      const changed = g0 && g0 !== 'B';
+      $('#rfb').innerHTML = `<div class="fb ok">${changed ? `你從 ${g0} 改成了 B。<b>當想法和證據不符時，根據證據改變想法，就是科學思維！</b>` : '你的證據支持你原本的想法，很棒！'}<br>科學家對地球做了很多測量，所有證據都表明：<b>大約 71% 的地球被海洋覆蓋</b>，最接近 B 圖。</div>`;
+      if (!S.concepts[2]) unlockConcept(2, () => fin()); else fin();
+    } else if (g2) $('#rfb').innerHTML = `<div class="fb no">${g2} 圖的海水是 ${GUESS[g2][1]}%。你的拋接結果是 ${pct()}% 落在海洋，哪一張比較接近？</div>`;
+  }
+  function fin() {
+    complete(5);
+    $('#after5').innerHTML = `<div class="stack"><div class="panel stack" style="gap:6px"><b>和同學討論：</b><p>為什麼你認為「地球大部分被海洋覆蓋」是重要的概念？接下來的單元，我們會進一步調查這個問題。</p></div>${nextBtn(5)}</div>`; bindNext(5);
+  }
+  paintTally();
+}
+function chart(h) {
+  const W = 320, H = 170, L = 34, R = 12, T = 12, B = 26, n = h.length;
+  const xs = i => L + (n <= 1 ? 0 : i / (n - 1)) * (W - L - R), ys = v => T + (1 - v / 100) * (H - T - B);
+  const ticks = [0, 25, 50, 75, 100];
+  const line = n ? h.map((v, i) => `${i ? 'L' : 'M'}${xs(i).toFixed(1)} ${ys(v).toFixed(1)}`).join(' ') : '';
+  const area = n > 1 ? `${line} L${xs(n - 1).toFixed(1)} ${ys(0)} L${xs(0)} ${ys(0)}Z` : '';
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="海洋比例隨拋接次數的變化">
+    ${ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${ys(t)}" y2="${ys(t)}" stroke="var(--rule)" stroke-width="1"/><text x="${L - 6}" y="${ys(t) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${t}%</text>`).join('')}
+    <line x1="${L}" x2="${W - R}" y1="${ys(71)}" y2="${ys(71)}" stroke="var(--coral)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="${W - R}" y="${ys(71) - 5}" text-anchor="end" font-size="10.5" fill="var(--coral)">科學家測量：約 71%</text>
+    ${area ? `<path d="${area}" fill="var(--sea)" opacity=".12"/>` : ''}
+    ${line ? `<path d="${line}" fill="none" stroke="var(--sea)" stroke-width="2.2" stroke-linejoin="round"/>` : ''}
+    ${n ? `<circle cx="${xs(n - 1)}" cy="${ys(h[n - 1])}" r="4" fill="var(--sea)"/>` : `<text x="${(L + W - R) / 2}" y="${H / 2}" text-anchor="middle" font-size="12" fill="var(--muted)">拋出地球儀後，這裡會出現折線</text>`}
+    <text x="${L}" y="${H - 6}" font-size="10" fill="var(--muted)">第 1 次</text><text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="10" fill="var(--muted)">第 ${Math.max(n, 1)} 次</text>
+  </svg>`;
+}
+
+/* ===== 6 海洋星球？ ===== */
+function stPlanet(el) {
+  const T = S.toss, n = T.land + T.ocean;
+  const ev = [`拋接地球儀 ${n} 次，${n ? Math.round(T.ocean / n * 100) : 0}% 落在海洋`, `海洋路線描了 ${S.best.ocean.toLocaleString('zh-TW')} 公里`, '地球儀上可以轉到幾乎全是海洋的一面', '海洋之間沒有界線，全部相連'];
+  el.innerHTML = `${head('海洋星球？', 'p.16 步驟 9；p.17 科學筆記與回顧提示')}
+  <div class="stack">
+  ${guide('因為地球大部分被海洋覆蓋，所以有些人說，我們應該把地球稱為「<b>海洋星球</b>」。但也有人說「陸地星球」更準確：因為和地球的岩石比起來，海洋其實只是很淺的一層。你覺得呢？')}
+  <div class="panel stack" style="gap:12px"><p class="q">你認為哪個是我們星球最準確的名字？</p>
+    <div class="row"><button class="choice ${S.planet === 'ocean' ? 'on' : ''}" data-pl="ocean">海洋星球</button><button class="choice ${S.planet === 'land' ? 'on' : ''}" data-pl="land">陸地星球</button></div>
+    <div id="pwhy" ${S.planet ? '' : 'hidden'} class="stack" style="gap:8px">
+      <b>哪些證據讓你這樣想？</b><span class="muted" style="font-size:14px">點一下可以把證據加進理由裡。</span>
+      <div class="row" style="gap:6px">${ev.map(e => `<button class="chip" data-ev="${esc(e)}">${esc(e)}</button>`).join('')}</div>
+      <textarea id="pw" style="min-height:100px" placeholder="我認為……，因為……">${esc(S.planetWhy)}</textarea>
+      <div id="pfb3"></div>
+    </div></div>
+  <div class="panel stack" style="gap:10px"><p class="q">回顧：在不同地方，海洋有什麼不同？</p>
+    <div class="fb info" style="white-space:pre-wrap"><b>我的第一個想法：</b>\n${esc(S.idea || '（還沒寫）')}</div>
+    <label for="rv"><b>現在，你想補充或修改什麼？</b></label>
+    <textarea id="rv" style="min-height:100px" placeholder="我學到了……／我想補充……">${esc(S.revised)}</textarea>
+    <p class="muted" style="font-size:14px">在第 1.8 節，你還會再寫一次修訂後的想法。</p>
+  </div>
+  <div class="panel stack" style="gap:8px"><p class="q">關於海洋，你還有什麼問題？還想知道什麼？</p>
+    <textarea id="qs" style="min-height:80px" placeholder="我想知道……">${esc(S.questions || '')}</textarea></div>
+  <div class="row"><button class="btn" id="finish">完成第 1.1 節</button><span class="muted" id="fh"></span></div>
+  <div id="end"></div></div>`;
+  $$('[data-pl]').forEach(b => b.onclick = () => { S.planet = b.dataset.pl; save(); $$('[data-pl]').forEach(x => x.classList.toggle('on', x === b)); $('#pwhy').hidden = false; side(); });
+  const side = () => { if (!S.planet) return; $('#pfb3').innerHTML = `<div class="fb info">${S.planet === 'ocean' ? '有道理！71% 的地球表面被海洋覆蓋，這讓地球成為太陽系中獨一無二的星球。不過也想想看：海洋和整顆地球比起來，深度其實很淺喔。' : '很有想法！地球大部分是由岩石組成的，海洋只是很淺的一層。不過也想想看：地球表面約有 71% 被海洋覆蓋喔。'}兩種說法都可以，重點是<b>用證據說明你的理由</b>。</div>`; };
+  side();
+  const pw = $('#pw'); pw.oninput = () => { S.planetWhy = pw.value; save(); };
+  $$('[data-ev]').forEach(b => b.onclick = () => { pw.value += (pw.value ? '、' : '') + b.dataset.ev; pw.oninput(); });
+  $('#rv').oninput = e => { S.revised = e.target.value; save(); };
+  $('#qs').oninput = e => { S.questions = e.target.value; save(); };
+  $('#finish').onclick = () => {
+    if (!S.planet || S.planetWhy.trim().length < 4) { $('#fh').textContent = '先選一個名字，並寫下你的理由。'; return; }
+    $('#fh').textContent = ''; S.doneAll = true; complete(6); log(`我認為地球最準確的名字是：${S.planet === 'ocean' ? '海洋星球' : '陸地星球'}`);
+    endScreen();
+  };
+  if (S.doneAll) endScreen();
+  function endScreen() {
+    $('#end').innerHTML = `<div class="panel stack" style="gap:12px;border-color:var(--ok)">
+      <h3 class="q" style="color:var(--ok)">恭喜 ${esc(S.name)}，完成第 1.1 節「海洋星球」！</h3>
+      <p>你收集了 ${S.badges.filter(b => b > 0).length} 枚徽章，並在概念牆貼上了 ${S.concepts.filter(Boolean).length} 個關鍵概念。下一節「模擬洋流」，我們會繼續調查海洋。</p>
+      <div class="row"><button class="btn sec" id="nb2">打開我的筆記本</button><button class="btn-plain" id="copyNb">複製筆記本內容（交給老師）</button><span class="muted" id="cpm"></span></div></div>`;
+    $('#nb2').onclick = openNotebook; $('#copyNb').onclick = copyNotebook;
+  }
+}
+
+/* ---------- 筆記本 ---------- */
+function notebookText() {
+  const T = S.toss, n = T.land + T.ocean;
+  return [`【海洋星球 調查筆記本】調查員：${S.name}`,
+    `一、第一個想法：${S.idea || '—'}`,
+    `二、多少海洋？第一次猜測：${S.guess || '—'}；理由：${[...S.guessTags, S.guessWhy].filter(Boolean).join('、') || '—'}`,
+    `三、地球儀探索：找到 ${Object.keys(S.found).join('、') || '—'}；海洋最長路線 ${S.best.ocean} 公里、陸地最長路線 ${S.best.land} 公里`,
+    `四、拋接地球儀：共 ${n} 次，海洋 ${T.ocean} 次、陸地 ${T.land} 次（海洋 ${n ? Math.round(T.ocean / n * 100) : 0}%）`,
+    `五、修正後的猜測：${S.guess || '—'} → ${S.guess2 || '—'}`,
+    `六、地球最準確的名字：${S.planet === 'ocean' ? '海洋星球' : S.planet === 'land' ? '陸地星球' : '—'}；理由：${S.planetWhy || '—'}`,
+    `七、補充後的想法：${S.revised || '—'}`,
+    `八、我還想知道：${S.questions || '—'}`,
+    `概念牆：${CONCEPTS.filter((_, i) => S.concepts[i]).join(' ') || '—'}`].join('\n');
+}
+function copyNotebook() {
+  const t = notebookText(), m = $('#cpm');
+  const fallback = () => { overlay(`<h3 class="q">筆記本內容</h3><p class="muted">請全選後複製：</p><textarea id="cpt" style="min-height:240px">${esc(t)}</textarea><div class="row"><button class="btn" data-close>關閉</button></div>`); const a = $('#cpt'); a.focus(); a.select(); };
+  try { navigator.clipboard.writeText(t).then(() => { if (m) m.textContent = '已複製！'; }, fallback); } catch (e) { fallback(); }
+}
+function openNotebook() {
+  const T = S.toss, n = T.land + T.ocean;
+  const item = (h, b) => `<div class="nb-item"><h4>${h}</h4><p>${b}</p></div>`;
+  overlay(`<h3 class="q">我的調查筆記本${S.name ? '｜' + esc(S.name) : ''}</h3>
+    ${item('第一個想法', esc(S.idea || '還沒寫'))}
+    ${item('第一次猜測', S.guess ? `${S.guess} 圖（陸地 ${GUESS[S.guess][0]}%、海水 ${GUESS[S.guess][1]}%）` : '還沒選')}
+    ${n ? item('拋接地球儀', `海洋 ${tallyMarks(T.ocean)}（${T.ocean}）　陸地 ${tallyMarks(T.land)}（${T.land}）`) : ''}
+    ${item('調查紀錄', S.log.length ? S.log.map(esc).join('\n') : '開始調查後，你的發現會自動記在這裡。')}
+    <div class="row"><button class="btn" data-close>關上筆記本</button><button class="btn-plain" id="cp2">複製內容</button><span class="muted" id="cpm"></span></div>`);
+  $('#cp2').onclick = copyNotebook;
+}
+
+/* ---------- 啟動 ---------- */
+function start() {
+  $('#brandTitle').textContent = '海洋星球'; $('#brandSub').textContent = '調查筆記本｜第 1.1 節';
+  if (!S.name) S.name = getName();
+  if (!window.d3) { $('#stage').innerHTML = '<div class="fb no">地圖程式載入失敗，請檢查網路連線後重新整理頁面。</div>'; return; }
+  if (!LMASK) buildMask();
+  $('#nbBtn').onclick = openNotebook;
+  $('#reset').onclick = () => {
+    overlay(`<h3 class="q">要重新開始嗎？</h3><p>筆記本裡的所有內容、徽章和概念都會清除。</p><div class="row"><button class="btn" id="yes">清除並重新開始</button><button class="btn-plain" data-close>取消</button></div>`);
+    $('#yes').onclick = () => { S = fresh(); save(); $('.ov').remove(); render(); };
+  };
+  if (S.stage > S.maxStage) S.stage = S.maxStage;
+  render();
+}
+
+return { start, stop: () => { if (globe) { globe.destroy(); globe = null; } }, progress: () => ({ done: S.badges.filter(b => b > 0).length, total: STAGES.length - 1 }) };
+})();
+

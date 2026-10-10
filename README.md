@@ -1,0 +1,70 @@
+# 海洋科學調查筆記本
+
+依國家海洋研究院《海洋科學序列教材（OSS）G3–G5 初階海洋素養》設計的線上互動遊戲。學生跟著遊戲角色「海博士」，像海洋科學家一樣觀察、收集證據、用證據解釋海洋。每一節都對照教師手冊的教學流程，學生可以自己一站一站完成。
+
+- 線上網址：`https://<你的 GitHub 帳號>.github.io/ocean-science-notebook/`（啟用 GitHub Pages 後產生）
+- 適用對象：國小三到五年級
+- 使用裝置：電腦、平板、手機的瀏覽器都可以，不需要安裝或登入
+
+## 目前完成的單元
+
+| 節次 | 名稱 | 遊戲內容 | 直接開啟 |
+|---|---|---|---|
+| 1.1 | 海洋星球 | 第一個想法、證據與感覺分類、3D 地球儀探索（找海洋、描最長路線、看見大部分是水）、討論模型、拋接地球儀（正字記錄與 71% 比例圖）、海洋星球回顧 | 網址後加 `#u11` |
+| 2.1 | 介紹海洋生物 | 第一個想法、16 張生物適應圖卡的生物之旅、分享與聆聽、逐步完成《生物需求》圖表（動物的食物、呼吸與魚鰓、類植物生物）、回顧 | 網址後加 `#u21` |
+
+其他節次在首頁標示「製作中」。
+
+## 功能
+
+- **單元選單**：首頁依教材的三個單元排列，顯示每一節的進度。
+- **調查筆記本**：學生的想法、選擇和發現自動記錄，可隨時打開；完成後可一鍵複製筆記本內容交給老師。
+- **概念牆、科學詞彙、徽章**：隨著進度解鎖教材中的關鍵概念。
+- **教師手冊對照**：每一站標出對應的手冊頁碼與步驟。
+- **進度保存**：學生的名字和每個單元的進度存在該台裝置的瀏覽器裡，關掉再開也會保留；按「重新開始」可以清除。
+
+## 上傳到 GitHub 並啟用網站（不需要會寫程式）
+
+1. 登入 [GitHub](https://github.com)，右上角「+」→「New repository」。
+2. Repository name 填 `ocean-science-notebook`，選 **Public**，按「Create repository」。
+3. 在新 repo 頁面點「uploading an existing file」，把這個資料夾**裡面的所有檔案和資料夾**（`index.html`、`src`、`vendor`、`build.py`、`README.md`、`LICENSE`、`.nojekyll`）一起拖進去，按「Commit changes」。
+   - `.nojekyll` 是隱藏檔，若電腦看不到，可略過，不影響網站運作。
+4. 到 repo 的「Settings」→ 左側「Pages」→「Build and deployment」：Source 選「Deploy from a branch」，Branch 選 `main`、資料夾 `/ (root)`，按「Save」。
+5. 等 1–2 分鐘，重新整理 Pages 頁面，上方會出現網址 `https://<帳號>.github.io/ocean-science-notebook/`。
+
+更新網站時，只要再上傳新的 `index.html`（覆蓋舊檔）即可，網址不變。
+
+## 在自己電腦上打開
+
+直接用瀏覽器開啟 `index.html` 就能使用，不需要網路（字型會改用電腦內建字型）。
+
+## 修改與新增單元
+
+網站由 `src/` 裡的檔案組合而成，修改後執行：
+
+```bash
+python3 build.py
+```
+
+就會重新產生 `index.html`。
+
+| 檔案 | 內容 |
+|---|---|
+| `src/head.html` | 頁面標題與所有樣式（顏色、字型、版面） |
+| `src/body.html` | 網站外框（頂部列、路線、概念牆側欄） |
+| `src/common.js` | 共用工具與學生姓名 |
+| `src/art.js` | 生物插圖 |
+| `src/unit-1-1.js` | 1.1 海洋星球 |
+| `src/unit-2-1.js` | 2.1 介紹海洋生物 |
+| `src/site.js` | 首頁單元選單與網址導覽 |
+| `src/land-110m.geojson` | 地球儀的陸地資料 |
+
+新增單元：仿照 `unit-2-1.js` 建立新檔（例如 `unit-2-2.js`，模組名稱 `UNIT22`），把檔名加入 `build.py` 的 `UNIT_FILES`，並在 `src/site.js` 的 `UNITS` 加上 `u22: UNIT22`、在 `CATALOG` 對應節次加上 `'u22'`。
+
+## 資料來源與授權
+
+- 教學內容依據國家海洋研究院《海洋科學序列教材 G3–G5 初階海洋素養》教師手冊改編，教材著作權屬原權利人。
+- 生物插圖、遊戲程式與介面為本專案原創，程式碼以 MIT 授權釋出（見 `LICENSE`）。
+- 地圖資料：Natural Earth（公眾領域），經 world-atlas 轉換。
+- 地圖繪製：D3.js（ISC 授權，見 `vendor/LICENSE-d3.txt`）。
+- 字型：Google Fonts 的 Huninn、Noto Sans TC（SIL Open Font License）。
