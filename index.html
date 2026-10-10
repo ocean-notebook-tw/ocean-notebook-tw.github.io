@@ -319,6 +319,7 @@ textarea:focus,input:focus{border-color:var(--sea);outline:none}
     <button class="btn-plain" id="homeBtn" hidden>單元選單</button>
     <button class="btn-plain unit-only" id="nbBtn" hidden>我的筆記本</button>
     <button class="btn-plain unit-only" id="reset" hidden>重新開始</button>
+    <button class="btn-plain home-only" id="resetAll" hidden>重新開始（換下一位同學）</button>
   </header>
   <section id="home" class="home"></section>
   <section id="unitView" hidden>
@@ -343,6 +344,21 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const NAME_KEY = 'oss-student-name';
 function getName() { try { return localStorage.getItem(NAME_KEY) || ''; } catch (e) { return ''; } }
+function clearAllProgress() {
+  try { Object.keys(localStorage).filter(k => k.startsWith('ocean-') || k === NAME_KEY).forEach(k => localStorage.removeItem(k)); } catch (e) { }
+  location.hash = 'home'; location.reload();
+}
+function confirmClearAll() {
+  const ov = document.createElement('div'); ov.className = 'ov';
+  ov.innerHTML = `<div class="dlg" role="dialog" aria-modal="true"><h3 class="q">要換下一位同學嗎？</h3>
+    <p>會清除<b>這台電腦上所有單元</b>的進度、徽章、筆記本內容，以及調查員的名字，讓下一位同學從頭開始。</p>
+    <p class="muted" style="font-size:14px">還沒交給老師的話，請先打開「我的筆記本」，按「複製我的筆記本」。</p>
+    <div class="row"><button class="btn" data-yes>清除全部，換下一位同學</button><button class="btn-plain" data-no>取消</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-no]').onclick = () => ov.remove();
+  ov.querySelector('[data-yes]').onclick = clearAllProgress;
+  ov.querySelector('[data-no]').focus();
+}
 function setName(v) { try { localStorage.setItem(NAME_KEY, v); } catch (e) { } }
 /* ===== 海博士 AI：回饋區塊、問海博士對話框、與 API 溝通 ===== */
 /* 設定在網站根目錄的 ai-config.js（window.AI_CONFIG），不需要重新建置就能修改。 */
@@ -1525,8 +1541,9 @@ function start() {
   if (!LMASK) buildMask();
   $('#nbBtn').onclick = openNotebook;
   $('#reset').onclick = () => {
-    overlay(`<h3 class="q">要重新開始嗎？</h3><p>筆記本裡的所有內容、徽章和概念都會清除。</p><div class="row"><button class="btn" id="yes">清除並重新開始</button><button class="btn-plain" data-close>取消</button></div>`);
+    overlay(`<h3 class="q">要重新開始嗎？</h3><p><b>只清除這個單元</b>：這一節的筆記本內容、徽章和概念會清除，名字和其他單元保留。</p><p><b>換下一位同學</b>：清除這台電腦上所有單元的進度和名字。</p><div class="row"><button class="btn" id="yes">只清除這個單元</button><button class="btn sec" id="allYes">換下一位同學</button><button class="btn-plain" data-close>取消</button></div>`);
     $('#yes').onclick = () => { S = fresh(); save(); $('.ov').remove(); render(); };
+    $('#allYes').onclick = () => { $('.ov').remove(); confirmClearAll(); };
   };
   if (S.stage > S.maxStage) S.stage = S.maxStage;
   render();
@@ -2019,8 +2036,9 @@ function start() {
   if (!S.name) S.name = getName();
   $('#nbBtn').onclick = openNotebook;
   $('#reset').onclick = () => {
-    overlay(`<h3 class="q">要重新開始嗎？</h3><p>筆記本裡的所有內容、徽章和概念都會清除。</p><div class="row"><button class="btn" id="yes">清除並重新開始</button><button class="btn-plain" data-close>取消</button></div>`);
+    overlay(`<h3 class="q">要重新開始嗎？</h3><p><b>只清除這個單元</b>：這一節的筆記本內容、徽章和概念會清除，名字和其他單元保留。</p><p><b>換下一位同學</b>：清除這台電腦上所有單元的進度和名字。</p><div class="row"><button class="btn" id="yes">只清除這個單元</button><button class="btn sec" id="allYes">換下一位同學</button><button class="btn-plain" data-close>取消</button></div>`);
     $('#yes').onclick = () => { S = fresh(); save(); $('.ov').remove(); render(); };
+    $('#allYes').onclick = () => { $('.ov').remove(); confirmClearAll(); };
   };
   if (S.stage > S.maxStage) S.stage = S.maxStage;
   render();
@@ -2039,7 +2057,7 @@ const CATALOG = [
 const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function showHome() {
   $('#brandTitle').textContent = '海洋科學調查筆記本'; $('#brandSub').textContent = '海洋科學序列教材 G3–G5 初階海洋素養';
-  $('#home').hidden = false; $('#unitView').hidden = true; $('#homeBtn').hidden = true; $$('.unit-only').forEach(b => b.hidden = true);
+  $('#home').hidden = false; $('#unitView').hidden = true; $('#homeBtn').hidden = true; $$('.unit-only').forEach(b => b.hidden = true); $$('.home-only').forEach(b => b.hidden = false);
   const nm = getName(); $('#who').textContent = nm ? `調查員：${nm}` : '';
   $('#home').innerHTML = `
     <div class="hero">
@@ -2059,12 +2077,13 @@ function route() {
   $$('.ov').forEach(o => o.remove());
   if (current && current.stop) current.stop();
   if (UNITS[h]) {
-    current = UNITS[h]; $('#home').hidden = true; $('#unitView').hidden = false; $('#homeBtn').hidden = false; $$('.unit-only').forEach(b => b.hidden = false);
+    current = UNITS[h]; $('#home').hidden = true; $('#unitView').hidden = false; $('#homeBtn').hidden = false; $$('.unit-only').forEach(b => b.hidden = false); $$('.home-only').forEach(b => b.hidden = true);
     current.start(); AI.showChat(true);
   } else { current = null; AI.showChat(false); AI.setContext(null); showHome(); }
   window.scrollTo(0, 0);
 }
 $('#homeBtn').onclick = () => { location.hash = 'home'; };
+$('#resetAll').onclick = confirmClearAll;
 window.addEventListener('hashchange', route);
 route();
 </script>

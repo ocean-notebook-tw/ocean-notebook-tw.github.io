@@ -9,7 +9,7 @@ const CATALOG = [
 const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function showHome() {
   $('#brandTitle').textContent = '海洋科學調查筆記本'; $('#brandSub').textContent = '海洋科學序列教材 G3–G5 初階海洋素養';
-  $('#home').hidden = false; $('#unitView').hidden = true; $('#homeBtn').hidden = true; $$('.unit-only').forEach(b => b.hidden = true);
+  $('#home').hidden = false; $('#unitView').hidden = true; $('#homeBtn').hidden = true; $$('.unit-only').forEach(b => b.hidden = true); $$('.home-only').forEach(b => b.hidden = false);
   const nm = getName(); $('#who').textContent = nm ? `調查員：${nm}` : '';
   $('#home').innerHTML = `
     <div class="hero">
@@ -29,11 +29,12 @@ function route() {
   $$('.ov').forEach(o => o.remove());
   if (current && current.stop) current.stop();
   if (UNITS[h]) {
-    current = UNITS[h]; $('#home').hidden = true; $('#unitView').hidden = false; $('#homeBtn').hidden = false; $$('.unit-only').forEach(b => b.hidden = false);
+    current = UNITS[h]; $('#home').hidden = true; $('#unitView').hidden = false; $('#homeBtn').hidden = false; $$('.unit-only').forEach(b => b.hidden = false); $$('.home-only').forEach(b => b.hidden = true);
     current.start(); AI.showChat(true);
   } else { current = null; AI.showChat(false); AI.setContext(null); showHome(); }
   window.scrollTo(0, 0);
 }
 $('#homeBtn').onclick = () => { location.hash = 'home'; };
+$('#resetAll').onclick = confirmClearAll;
 window.addEventListener('hashchange', route);
 route();

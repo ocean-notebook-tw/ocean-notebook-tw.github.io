@@ -885,8 +885,9 @@ function start() {
   if (!LMASK) buildMask();
   $('#nbBtn').onclick = openNotebook;
   $('#reset').onclick = () => {
-    overlay(`<h3 class="q">要重新開始嗎？</h3><p>筆記本裡的所有內容、徽章和概念都會清除。</p><div class="row"><button class="btn" id="yes">清除並重新開始</button><button class="btn-plain" data-close>取消</button></div>`);
+    overlay(`<h3 class="q">要重新開始嗎？</h3><p><b>只清除這個單元</b>：這一節的筆記本內容、徽章和概念會清除，名字和其他單元保留。</p><p><b>換下一位同學</b>：清除這台電腦上所有單元的進度和名字。</p><div class="row"><button class="btn" id="yes">只清除這個單元</button><button class="btn sec" id="allYes">換下一位同學</button><button class="btn-plain" data-close>取消</button></div>`);
     $('#yes').onclick = () => { S = fresh(); save(); $('.ov').remove(); render(); };
+    $('#allYes').onclick = () => { $('.ov').remove(); confirmClearAll(); };
   };
   if (S.stage > S.maxStage) S.stage = S.maxStage;
   render();
