@@ -2,7 +2,7 @@
 
 依國家海洋研究院《海洋科學序列教材（OSS）G3–G5 初階海洋素養》設計的線上互動遊戲。學生跟著遊戲角色「海博士」，像海洋科學家一樣觀察、收集證據、用證據解釋海洋。每一節都對照教師手冊的教學流程，學生可以自己一站一站完成。
 
-- 線上網址：`https://<你的 GitHub 帳號>.github.io/ocean-science-notebook/`（啟用 GitHub Pages 後產生）
+- **線上網址：<https://ocean-notebook-tw.github.io/>**
 - 適用對象：國小三到五年級
 - 使用裝置：電腦、平板、手機的瀏覽器都可以，不需要安裝或登入
 
@@ -10,8 +10,8 @@
 
 | 節次 | 名稱 | 遊戲內容 | 直接開啟 |
 |---|---|---|---|
-| 1.1 | 海洋星球 | 第一個想法、證據與感覺分類、3D 地球儀探索（找海洋、描最長路線、看見大部分是水）、討論模型、拋接地球儀（正字記錄與 71% 比例圖）、海洋星球回顧 | 網址後加 `#u11` |
-| 2.1 | 介紹海洋生物 | 第一個想法、16 張生物適應圖卡的生物之旅、分享與聆聽、逐步完成《生物需求》圖表（動物的食物、呼吸與魚鰓、類植物生物）、回顧 | 網址後加 `#u21` |
+| 1.1 | 海洋星球 | 第一個想法、證據與感覺分類、3D 地球儀探索（找海洋、描最長路線、看見大部分是水）、討論模型、拋接地球儀（正字記錄與 71% 比例圖）、海洋星球回顧 | [開啟 1.1](https://ocean-notebook-tw.github.io/#u11) |
+| 2.1 | 介紹海洋生物 | 第一個想法、16 張生物適應圖卡的生物之旅、分享與聆聽、逐步完成《生物需求》圖表（動物的食物、呼吸與魚鰓、類植物生物）、回顧 | [開啟 2.1](https://ocean-notebook-tw.github.io/#u21) |
 
 其他節次在首頁標示「製作中」。
 
@@ -23,16 +23,13 @@
 - **教師手冊對照**：每一站標出對應的手冊頁碼與步驟。
 - **進度保存**：學生的名字和每個單元的進度存在該台裝置的瀏覽器裡，關掉再開也會保留；按「重新開始」可以清除。
 
-## 上傳到 GitHub 並啟用網站（不需要會寫程式）
+## 網站發布方式
 
-1. 登入 [GitHub](https://github.com)，右上角「+」→「New repository」。
-2. Repository name 填 `ocean-science-notebook`，選 **Public**，按「Create repository」。
-3. 在新 repo 頁面點「uploading an existing file」，把這個資料夾**裡面的所有檔案和資料夾**（`index.html`、`src`、`vendor`、`build.py`、`README.md`、`LICENSE`、`.nojekyll`）一起拖進去，按「Commit changes」。
-   - `.nojekyll` 是隱藏檔，若電腦看不到，可略過，不影響網站運作。
-4. 到 repo 的「Settings」→ 左側「Pages」→「Build and deployment」：Source 選「Deploy from a branch」，Branch 選 `main`、資料夾 `/ (root)`，按「Save」。
-5. 等 1–2 分鐘，重新整理 Pages 頁面，上方會出現網址 `https://<帳號>.github.io/ocean-science-notebook/`。
+網站使用 GitHub Pages 發布：repo 為 Public，Settings →「Pages」設定為 Deploy from a branch、`main` 分支、`/ (root)` 資料夾。
 
-更新網站時，只要再上傳新的 `index.html`（覆蓋舊檔）即可，網址不變。
+**更新網站**：在 repo 首頁點「Add file」→「Upload files」，把新的 `index.html`（或修改過的檔案）拖進去，按「Commit changes」。1–2 分鐘後網站自動更新，網址不變。
+
+**自行架設一份**：Fork 這個 repo，或把所有檔案上傳到你自己的 Public repo，再依上面的方式啟用 Pages，網址會是 `https://<帳號或組織>.github.io/<repo 名稱>/`。
 
 ## 在自己電腦上打開
 
